@@ -209,3 +209,4 @@
   r11, L2 r5). A tool fetch, not a reference leak, but the rule has no
   exceptions after the allowlist was dropped. Reported in the README.
 - After the reruns analyze.py reports opus $17.18 (the $17.17 above predates the two opus reruns) and 5 excluded runs (the 2 detector false positives were rerun clean). README (3fb47a7) follows analyze.py.
+- Transcripts, stderr, final messages and codex sessions backed up to ../specdial-transcripts-2026-10-01.tar.gz (9.6 MB) after the grid.
