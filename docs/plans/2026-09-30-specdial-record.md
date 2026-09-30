@@ -187,3 +187,11 @@
   distinct and safe. Known and accepted: duplicate detection sorts object keys,
   so toCsv's generator skips rows that differ only in key order, slightly
   thinning key-order variety; hand-written key-order inputs are unaffected.
+- Runner fixes landed (4279db1): typescript 7.0.2 local, prompt in
+  result.json, Codex session copied (gitignored; holds Codex account ids, never
+  publish), `npx tsc` bare is local, `npx tsc@<v>` still a fetch. Probe clean.
+- Pilot runs removed from the tree; T13 marked done on its pilot commit.
+
+## T15 grid
+
+- Launched with REPS=15 JOBS=4 on the final image, after probe.
