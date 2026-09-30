@@ -88,8 +88,6 @@ const handWritten: Array<[category: string, ms: Ms]> = [
 
   ["open-very-large", 1e10],
   ["open-very-large", 9007199254740991],
-  ["open-very-large", 1e21],
-  ["open-very-large", 1.5e300],
 ];
 
 const nearAnchor = fc
@@ -116,13 +114,29 @@ function encode(ms: Ms): unknown {
   return ms === undefined ? { $undefined: true } : ms;
 }
 
+// Distinct from each other and from every hand-written input, and within
+// Number.MAX_SAFE_INTEGER, because check_tasks.py refuses a corpus otherwise.
+function generatedMs(): Ms[] {
+  const seen = new Set(handWritten.map(([, ms]) => JSON.stringify([encode(ms)])));
+  const out: Ms[] = [];
+  for (const ms of fc.sample(generatedArbitrary, { seed: SEED, numRuns: 5000 })) {
+    if (typeof ms === "number" && Math.abs(ms) > Number.MAX_SAFE_INTEGER) continue;
+    const key = JSON.stringify([encode(ms)]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ms);
+    if (out.length === GENERATED_COUNT) return out;
+  }
+  throw new Error(`only ${out.length} distinct safe generated inputs`);
+}
+
 const inputs = [
   ...handWritten.map(([category, ms], i) => ({
     id: `h${String(i + 1).padStart(3, "0")}`,
     category,
     args: [encode(ms)],
   })),
-  ...fc.sample(generatedArbitrary, { seed: SEED, numRuns: GENERATED_COUNT }).map((ms, i) => ({
+  ...generatedMs().map((ms, i) => ({
     id: `g${String(i + 1).padStart(4, "0")}`,
     category: "generated",
     args: [encode(ms)],

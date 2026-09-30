@@ -5,6 +5,10 @@ A task passes when:
   - it has every file the runner and scorer read
   - the corpus has at least 40 hand-written and 500 generated inputs, and no
     hand-written input is labelled "generated"
+  - no two inputs have equal args (and probe, for globToRegex), so no input is
+    scored twice
+  - no number in any args exceeds Number.MAX_SAFE_INTEGER in absolute value,
+    because JSON round trips cannot promise to keep such a number exact
   - no corpus string of 6 or more characters appears verbatim in a file an
     agent can see, so no visible file hands out a scored input
   - the reference loads, passes every visible test, and the stub passes none
@@ -33,6 +37,7 @@ VISIBLE = ["ticket.md", "examples.test.ts", "spec.md", "properties.test.ts"]
 MIN_HAND_WRITTEN = 40
 MIN_GENERATED = 500
 MIN_LEAK_LENGTH = 6
+MAX_SAFE_INTEGER = 9007199254740991
 ENV = {**os.environ, "TZ": "UTC"}
 
 
@@ -43,6 +48,18 @@ def strings_in(value) -> list[str]:
         return [s for v in value for s in strings_in(v)]
     if isinstance(value, dict):
         return [s for v in value.values() for s in strings_in(v)]
+    return []
+
+
+def numbers_in(value) -> list[int | float]:
+    if isinstance(value, bool):
+        return []
+    if isinstance(value, (int, float)):
+        return [value]
+    if isinstance(value, list):
+        return [n for v in value for n in numbers_in(v)]
+    if isinstance(value, dict):
+        return [n for v in value.values() for n in numbers_in(v)]
     return []
 
 
@@ -105,6 +122,17 @@ def check(task: Path) -> str | None:
         return f"corpus has {generated} generated inputs, needs {MIN_GENERATED}"
     if len(hand_written) < MIN_HAND_WRITTEN:
         return f"corpus has {len(hand_written)} hand-written inputs, needs {MIN_HAND_WRITTEN}"
+
+    first_with_args: dict[str, str] = {}
+    for i in inputs:
+        key = json.dumps([i["args"], i.get("probe")], sort_keys=True)
+        if key in first_with_args:
+            return f"duplicate args in {first_with_args[key]} and {i['id']}"
+        first_with_args[key] = i["id"]
+
+    for i in inputs:
+        if any(abs(n) > MAX_SAFE_INTEGER for n in numbers_in(i["args"])):
+            return f"unsafe number in {i['id']}"
 
     visible = {name: (task / name).read_text() for name in VISIBLE}
     for i in inputs:

@@ -84,7 +84,22 @@ const bareExtArb = fc.oneof(
 );
 const extArb = fc.tuple(fc.boolean(), bareExtArb).map(([dotted, ext]) => (dotted ? `.${ext}` : ext));
 
-const samples = fc.sample(fc.tuple(rawArb, extArb), { seed: 20260930, numRuns: 500 });
+// Distinct from each other and from every hand-written input, because
+// check_tasks.py refuses a corpus with two equal args.
+function generatedArgs(): [string, string][] {
+  const seen = new Set(handWritten.map(([, raw, extension]) => JSON.stringify([raw, extension])));
+  const out: [string, string][] = [];
+  for (const args of fc.sample(fc.tuple(rawArb, extArb), { seed: 20260930, numRuns: 5000 })) {
+    const key = JSON.stringify(args);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(args);
+    if (out.length === 500) return out;
+  }
+  throw new Error(`only ${out.length} distinct generated inputs`);
+}
+
+const samples = generatedArgs();
 
 const inputs: Input[] = [
   ...handWritten.map(([category, raw, extension], i): Input => ({
