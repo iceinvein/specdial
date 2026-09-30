@@ -19,7 +19,9 @@ RUN test -n "$CLAUDE_CODE_VERSION" && test -n "$CODEX_VERSION" \
  && npm cache clean --force
 
 # A CLI that updated itself mid-run would no longer match the recorded version.
-ENV DISABLE_AUTOUPDATER=1 LANG=C.UTF-8
+# npm's update check would reach the registry on every npx call and print a
+# notice into the agent's tool output.
+ENV DISABLE_AUTOUPDATER=1 NPM_CONFIG_UPDATE_NOTIFIER=false LANG=C.UTF-8
 
 RUN useradd --create-home --home-dir /home/candidate --shell /bin/bash candidate
 COPY --chown=candidate:candidate gitconfig /home/candidate/.gitconfig

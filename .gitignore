@@ -2,5 +2,6 @@ node_modules/
 runs/*/transcript.jsonl
 runs/*/stderr.txt
 runs/*/final_message.txt
+runs/*/codex_session.jsonl
 __pycache__/
 .sluice/
