@@ -1,0 +1,10 @@
+{"function": "parseEnv",
+ "inputs": [
+  {"id": "h001", "category": "plain", "args": ["A=1\nB=2"]},
+  {"id": "h002", "category": "quoted-value", "args": ["A=\"x y\""]},
+  {"id": "h003", "category": "value-with-equals", "args": ["URL=a=b"]},
+  {"id": "h004", "category": "comment", "args": ["# c\nA=1"]},
+  {"id": "h005", "category": "export-prefix", "args": ["export A=1"]},
+  {"id": "h006", "category": "value-with-equals", "args": ["K=x==y"]},
+  {"id": "h007", "category": "undefined", "args": [{"$undefined": true}]}
+ ]}
