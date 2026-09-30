@@ -62,17 +62,21 @@ and 14 runs, because the excluded runs below are left out of every number.
   together: no behaviour from one agent was also produced by another.
 - `safeFilename` reaches one behaviour, the reference's, for every agent from
   L2. `toCsv` gets there only at L3: at L2 every agent still splits on
-  `carriage-return-unquoted`, which the property tests settle.
+  `carriage-return-unquoted`, which the property tests settle. That split is
+  a spec ambiguity: the spec quotes a field that contains "a newline" and
+  cites RFC 4180, whose line break is CRLF, so a field holding a lone `\r`
+  can be read either way.
 - What still diverges at L3: `parseEnv` on `prototype-key` (Sonnet and Opus)
   and `export-as-key` (Opus); `globToRegex` on `**` (Sonnet and Opus, see
-  the spec gaps below); `formatDuration` on
+  the two `globToRegex` sections below); `formatDuration` on
   `under-10s-one-decimal-half-rounding`, for every agent.
 - Different code, same behaviour: `formatDuration` L2 Opus has 13 distinct
   sources and k 1.
 
 `TZ=UTC python3 analyze.py` prints every number above from the committed
 results, including the categories each cell disagrees on; `--json out.json`
-writes them as JSON.
+writes them as JSON. The model and CLI versions are the exception: they come
+from each run's `result.json`.
 
 ### Pre-registered expectations
 
@@ -117,19 +121,35 @@ disagreement with the reference, not as agent error.
   those cells go from 1 to 2.
 - `globToRegex`: the spec says `**` matches "any run of characters at all".
   The reference compiles `**` to `.*`, which does not match a newline
-  (`open-globstar-newline`). No `globToRegex` run matches the reference at any
-  level. At L2 and L3, apart from one Opus run on `open-question-astral-char`,
-  the hand-written categories where runs part from the reference are all
-  about `**`: the newline, and `**/` matching inside a path segment (the
-  reference's `**/Dockerfile` also matches `xDockerfile`), where the runs
-  treat `**/` as whole directories.
+  (`open-globstar-newline`). At L2 and L3, 73 of the 90 runs depart from the
+  reference there, but it is not the main reason no `globToRegex` run
+  matches the reference; the next section is.
+
+### `globToRegex`: the runs follow glob convention, not the spec
+
+No `globToRegex` run matches the reference at any level. The spec says the
+`/` after `**` is consumed as part of the `**`, so read as written,
+`**/Dockerfile` is `.*Dockerfile` and matches `xDockerfile`, and `a**/b`
+matches `axb`. The reference does exactly that. The runs instead read `**/` the
+way common glob tools do, as zero or more whole directories, so neither of
+those paths matches. At L2 and L3, 89 of the 90 runs depart from both the spec
+and the reference on `globstar-slash-root-literal` (`**/Dockerfile`) and
+`open-globstar-mid-segment-slash` (`a**/b`): all 45 at L2 and 44 at L3, the
+exception being `globToRegex__L3__sonnet__r10`. The same reading shows in
+`open-double-slash-after-globstar` (`**//x`, 89 of 90) and
+`open-globstar-trailing-slash` (`**/`). The newline gap cannot explain the
+miss on its own: 17 of those 90 runs match the reference on the newline input
+and still differ on `**/`, and the one run that reads `**/` as the reference
+does differs on the newline.
 
 ## How a run works
 
 Each run is a fresh Docker container from one pinned image (both CLIs at the
 host's versions, vitest, fast-check, tsx and typescript preinstalled), running
-as a non-root user with only the run's work dir mounted and a network that
-reaches the model APIs and nothing on the host or LAN. `probe.sh` checks the
+as a non-root user with only the run's work dir mounted, on a network that
+reaches the public internet but not the host or the LAN. The agents' web
+tools, web search and connectors are off, and every transcript is scanned for
+fetches: any run with one is excluded (see below). `probe.sh` checks the
 isolation before any paid run: no operator instructions in context, no GitHub
 or SSH identity, no host filesystem, no Codex web search or app connectors.
 
@@ -179,7 +199,8 @@ under a per-input time limit.
 - **Distinct sources**: `src_hash` is the sha256 of `impl.ts` after esbuild's
   TypeScript strip and whitespace minify, so it is identical for runs whose
   code is identical after that transform. Comments, formatting and type
-  annotations do not count.
+  annotations do not count; identifier names still do, so two runs that
+  differ only in a variable name are two sources.
 - **Where divergence survives**: every hand-written corpus input carries a
   category naming the spec clause or open decision it probes. Per cell,
   `analyze.py` lists the categories on which loaded runs disagree.
@@ -187,7 +208,7 @@ under a per-input time limit.
 Every score carries provenance (the sha256 of the corpus, reference and
 evaluator, and the image id). `score.py` refuses to mix fresh and stale
 scores, and `analyze.py` fails unless every score comes from the current
-corpus, one evaluator and one image.
+corpus, reference and evaluator and from one image.
 
 A run with contamination or an external fetch in its transcript is excluded
 from every number and listed with its reason. Cost counts every run,
@@ -199,14 +220,19 @@ Excluded, by that rule, because they ran `npx vite-node`, which fetches
 vite-node from npm: `globToRegex__L1__opus__r10`, `globToRegex__L1__opus__r11`,
 `globToRegex__L1__opus__r14`, `formatDuration__L1__opus__r11` and
 `formatDuration__L2__opus__r5`. It is a tool fetch, not a reference leak, but
-the rule has no exceptions. No run had contamination.
+the rule has no exceptions. No run had contamination. With the 5 runs kept
+(`TZ=UTC python3 analyze.py --include-excluded`), L1 median k is 11.00
+instead of 10.00 and mean effective behaviours 6.86 instead of 6.69, and
+`globToRegex` L1 is k 9 instead of 7 for Opus and 12 instead of 10 pooled.
 
 Rerun for infrastructure failures, not agent behaviour:
 `safeFilename__L0__codex__r1` to `r3` (killed when the first grid invocation
 hit the shell's time cap), `formatDuration__L0__codex__r5` (ended on "Selected
 model is at capacity"), and `formatDuration__L0__opus__r1` and `r12` (flagged
-by a fetch-detector bug that read the `2>` of `npm install --silent 2>&1` as a package name; fixed in `run.sh`
-before the rerun).
+by a fetch-detector bug that read the `2>` of `npm install --silent 2>&1` as a
+package name). The detector was fixed in `run.sh` and those two runs were then
+resampled, run again from scratch, not re-scanned: their committed results
+are new sessions.
 
 ## The task set
 
@@ -222,6 +248,29 @@ All sources are repositories under `github.com/iceinvein`.
 | `safeFilename` | forbidden characters, whitespace, dot handling, empty fallback, extension dot | `resume-builder@dd259b9:src/ui/shell/filename.ts:12` |
 | `formatDuration` | unit thresholds, rounding, null input, the minute boundary | `code_intelligence_mcp_server@42194dd:ui/src/lib/format.ts:30` |
 
+The L1 examples settle some of those decisions and leave the rest open:
+
+- `parseEnv`: comments (skipped, as are blank lines) and quote stripping
+  (double quotes), plus whitespace trimming and empty input. Open: the
+  `export ` prefix, first vs last `=`, duplicates, blank values.
+- `toCsv`: a header line from the row keys (every example row has the same
+  keys, so first row vs all rows stays open), the trailing newline, and
+  quoting a field with a comma. Open: missing keys, escaping, quoting for any
+  other character.
+- `globToRegex`: `*` vs `**`, `**/` at root and anchoring. Open:
+  metacharacter escaping, braces.
+- `safeFilename`: whitespace, forbidden characters (`:`, `/` and `?` are
+  shown dropped), the empty fallback (`resume`) and the extension dot. Open:
+  dot handling.
+- `formatDuration`: null input (an en dash) and the minute boundary (`60000`
+  is `1m 0s`), with one value per unit. Open: where the thresholds fall,
+  rounding.
+
+The plan asked for the common case plus at most two edge cases per file. The
+`toCsv` and `formatDuration` files keep to that; the `parseEnv`,
+`globToRegex` and `safeFilename` files go beyond it, which makes their L1
+more specified than intended.
+
 Each `tasks/<fn>/` holds:
 
 | File | Purpose |
@@ -233,18 +282,22 @@ Each `tasks/<fn>/` holds:
 | `examples.test.ts` | the L1 example tests |
 | `spec.md` | the L2 spec, mutgap's plain-English description of the reference |
 | `properties.test.ts` | the L3 property tests |
-| `gen.ts`, `corpus.json` | the held-out corpus: hand-written inputs tagged by category, plus generated inputs from a fixed-seed fast-check sample, all distinct |
+| `gen.ts`, `corpus.json` | the corpus, held out apart from the four inputs below: hand-written inputs tagged by category, plus generated inputs from a fixed-seed fast-check sample, all distinct |
 
 `check_tasks.py` refuses a task before any agent is paid to attempt it unless
 the reference passes every visible test and the stub none, no corpus string
-appears in a visible file, no two inputs are equal, no number is beyond
-`Number.MAX_SAFE_INTEGER`, and `buggy.ts` and `reference.ts` produce different
-signatures.
+of 6 or more characters appears in a visible file, no two inputs are equal, no
+number is beyond `Number.MAX_SAFE_INTEGER`, and `buggy.ts` and `reference.ts`
+produce different signatures. The leak rule covers only strings of 6 or more
+characters, so the corpus is held out except for four inputs that are also
+visible example inputs: `formatDuration` `null` (`h001`) and `60000` (`h048`),
+`parseEnv` `""` (`h064`) and `toCsv` `[]` (`h001`).
 
 ## Running it
 
-Requires Docker (Colima on macOS; the scratch dir sits under your home so the
-VM can see it), Node 24, Python 3, a Claude token made with
+Requires macOS with Colima as the Docker runtime (`run.sh` writes and checks
+its firewall through `colima ssh`, and the scratch dir sits under your home
+so the VM can see it), Node 24, Python 3, a Claude token made with
 `claude setup-token` in `~/.config/interview-signal/claude-oauth-token` (mode
 0600), and a Codex login in `~/.codex/auth.json`. Runs draw on those accounts.
 
@@ -264,6 +317,11 @@ per Claude run) and `WALL_S` (wall-clock cap per run) from the environment;
 its header has the defaults. `./run.sh --one <fn> <level> <agent> <rep>` runs
 exactly one. A run whose `result.json` exists is skipped; delete the run dir
 to rerun it.
+
+On a clone, `score.py` reports every committed score as stale, because the
+image built locally has a different id from the one recorded, so
+re-evaluating needs `TZ=UTC python3 score.py --rescore`. `analyze.py` needs no
+image and reproduces every number from the committed data as it is.
 
 ## What is committed
 
@@ -288,9 +346,12 @@ account ids.
   worker, so an implementation that keeps state at module level could answer
   an input differently depending on what ran before it. A fresh worker per
   input would cost one tsx load per evaluation.
-- **Sonnet is near-deterministic.** Repeated Sonnet runs of one prompt often
-  return the same code (`parseEnv` L1: 2 distinct sources), so its low k
-  partly measures its sampling rather than the request.
+- **Source text repeats.** From L1 up, every agent returns the same code in
+  more than one run of a cell: `parseEnv` L1 Sonnet has 2 distinct sources
+  in 15 runs and `safeFilename` L3 Codex has 1. Summed over the 20 cells,
+  Sonnet has 174 distinct sources in 300 runs, Opus 219 in 295 and Codex 178
+  in 300. A low k partly measures each tool's sampling, not only the
+  request.
 - **Small pure functions.** Five of them, single-file and stateless, which
   gives the cleanest behaviour signature and says little about multi-file or
   stateful work.
