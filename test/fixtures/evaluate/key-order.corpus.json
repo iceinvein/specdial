@@ -1,0 +1,3 @@
+{"function": "keyed",
+ "inputs": [{"id": "h001", "category": "case", "args": ["case"]},
+            {"id": "h002", "category": "integer-keys", "args": ["integer"]}]}
