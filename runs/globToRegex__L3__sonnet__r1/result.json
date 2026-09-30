@@ -1,0 +1,56 @@
+{
+  "fn": "globToRegex",
+  "level": "L3",
+  "agent": "sonnet",
+  "rep": 1,
+  "prompt": "Implement `globToRegex` in `src/globToRegex.ts`. The request is in `TICKET.md`, the full specification is in `SPEC.md`, and `src/globToRegex.test.ts` and `src/globToRegex.properties.test.ts` have tests it must pass. `npx vitest run` runs them.",
+  "cli": "2.1.285 (Claude Code)",
+  "impl_present": true,
+  "impl_refused": null,
+  "model": "claude-sonnet-5-5",
+  "effort": null,
+  "is_error": false,
+  "cost_usd": 0.05232819999999999,
+  "turns": 10,
+  "codex_steps": null,
+  "usage": {
+    "input_tokens": 12,
+    "cache_creation_input_tokens": 4675,
+    "cache_read_input_tokens": 55521,
+    "output_tokens": 2250,
+    "output_tokens_details": {
+      "thinking_tokens": 710
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 4675,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 430,
+        "cache_read_input_tokens": 11173,
+        "cache_creation_input_tokens": 593,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 593
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+  },
+  "contamination": [],
+  "external_fetches": [],
+  "timed_out": false,
+  "interrupted": null,
+  "exit_code": 0,
+  "wall_s": 27.169
+}
