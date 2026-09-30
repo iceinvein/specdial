@@ -195,3 +195,16 @@
 ## T15 grid
 
 - Launched with REPS=15 JOBS=4 on the final image, after probe.
+- First grid invocation stopped at the 2 h shell cap with 572/900 done, no partial dirs or stray containers; restarted (skip-existing) for the remaining 328.
+- Grid done: 900 result.json. Claude cost $23.83 (sonnet $6.66, opus
+  $17.17). No session timeouts, no contamination.
+- Reruns (infrastructure, per the plan's rule): safeFilename L0 codex r1 to r3
+  were SIGTERM'd when the first invocation hit the shell cap (the skip rule
+  kept their result.json); formatDuration L0 codex r5 ended on "Selected model
+  is at capacity". formatDuration L0 opus r1 and r12 were flagged by a
+  detector bug (`npm install --silent 2>&1` read `2>` as a package); fixed in
+  run.sh, verified on those exact commands, then rerun.
+- Kept as excluded, per the rule: 5 opus runs that ran `npx vite-node`, which
+  fetches vite-node from npm (globToRegex L1 r10, r11, r14; formatDuration L1
+  r11, L2 r5). A tool fetch, not a reference leak, but the rule has no
+  exceptions after the allowlist was dropped. Reported in the README.
