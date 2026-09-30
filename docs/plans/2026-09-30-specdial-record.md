@@ -149,3 +149,35 @@
   test gaps that let ABSENT, src null handling and column order go untested.
 - Decision: a run whose agent session timed out but left an impl is kept (it
   is still what the agent produced), flagged in a column.
+
+## T13 review and the changes it forces before the grid
+
+- Fresh reviewer: isolation held in all 36 runs; Claude impls replay
+  byte-identically from transcripts; six rescored runs reproduce
+  byte-identically; two cells recomputed by hand match analyze.py.
+- Artefact 1: 14 formatDuration inputs at or above 2^53 (up to 1.5e300)
+  measure float noise (`s % 60` against `s - m*60`), not spec reading. They
+  alone made "no run matches the reference": without them L2 is k=1 and 6 of
+  9 L3 runs match exactly; the other 3 differ only at 9950 (the recorded
+  toFixed gap). Decision: corpora carry no number beyond
+  Number.MAX_SAFE_INTEGER in magnitude.
+- Artefact 2: duplicate inputs (formatDuration 567 inputs, 384 distinct;
+  119500 appears 28 times; parseEnv has 7) weight agree_frac unevenly.
+  Decision: every corpus has distinct args; check_tasks enforces it; gen.ts
+  keeps sampling until it has 500 distinct generated inputs not equal to any
+  hand-written one.
+- Auditability, fixed in the runner: record the exact prompt in result.json;
+  copy Codex's session rollout into the run dir (gitignored like transcripts);
+  preinstall typescript in the image so `npx tsc` runs locally (the pilot's
+  `npx tsc` installed the unrelated deprecated `tsc@2.0.4` package, not
+  typescript; the record's earlier line was wrong) and stop flagging it; set
+  NPM_CONFIG_UPDATE_NOTIFIER=false. With typescript local, the analysis
+  allowlist for type-checker fetches is removed again.
+- Because the image changes, the 36 pilot runs are deleted and regenerated as
+  reps 1 to 3 of the full grid, so all 900 runs share one environment. The
+  pilot served its purpose (harness proven, cost measured at about $28 for
+  the Claude share of the grid). Transcripts get backed up outside the repo
+  after the grid.
+- Noted for the post: Sonnet is near-deterministic (all 3 L3 runs share one
+  source hash); for formatDuration, L3 added nothing over L2 except flipping
+  9950 via toFixed.
