@@ -68,6 +68,7 @@ const handWritten: [string, Row[]][] = [
   ["line-join-lf-trailing-newline", [{ solo: "one" }]],
   ["line-join-lf-trailing-newline", [{ r: "a" }, { r: "b" }]],
   ["quoted-fields-many-rows", [{ t: "a,b", u: 'c"d' }, { t: "e\nf", u: "plain" }]],
+  ["number-exponent", [{ tiny: 1e-7, small: 1.5e-10 }]],
 ];
 
 const keyPool = ["id", "name", "note", "qty", "price", "a,b", "tag"];

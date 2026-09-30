@@ -53,6 +53,7 @@
   {"id":"h051","category":"line-join-lf-trailing-newline","args":[[{"solo":"one"}]]},
   {"id":"h052","category":"line-join-lf-trailing-newline","args":[[{"r":"a"},{"r":"b"}]]},
   {"id":"h053","category":"quoted-fields-many-rows","args":[[{"t":"a,b","u":"c\"d"},{"t":"e\nf","u":"plain"}]]},
+  {"id":"h054","category":"number-exponent","args":[[{"tiny":1e-7,"small":1.5e-10}]]},
   {"id":"g0001","category":"generated","args":[[{"tag":-18404,"price":"a\"x,\n11","id":-2.7147607322532583e-15,"qty":-65115,"note":",b\""},{"note":1.6668129224443207,"id":"\r\nb\"","qty":3.3168600851951044e-127}]]},
   {"id":"g0002","category":"generated","args":[[{"name":"1\n\"\r\n,xba "},{"qty":83854,"tag":3.848960321809215e-181,"id":",\",b\n\"\n","note":""}]]},
   {"id":"g0003","category":"generated","args":[[{"qty":"\"  \r\r\na","id":-2.9234390796850425e-297,"a,b":"x ","tag":"b\n\n,\n\"","name":""}]]},
