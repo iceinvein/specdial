@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs agents over the function tasks, one fresh session per run, and writes
 #   runs/<fn>__<level>__<agent>__r<rep>/{impl.ts,result.json,transcript.jsonl,stderr.txt,final_message.txt}
+# plus, for Codex, codex_session.jsonl (the session rollout from its CODEX_HOME).
 #
 #   ./run.sh --one <fn> <level> <agent> <rep>   exactly one run
 #   ./run.sh --build-image                      build the agent image, with
@@ -560,7 +561,7 @@ fields["contamination"] = [m for m in markers if m in said]
 # (or another host) as whoever the session is logged in as. So do a host
 # named without a scheme to curl, wget, git clone or fetch(, any URL written
 # into a file with Write, Edit or a Codex file change, and any package npm
-# or npx would pull from the registry beyond the four the image preinstalls.
+# or npx would pull from the registry beyond the five the image preinstalls.
 # Reserved test domains, bare hostnames and loopback cannot reach anyone
 # else's server.
 allowed_hosts = {"registry.npmjs.org", "0.0.0.0"}
@@ -673,7 +674,11 @@ def downloader_targets(command):
 
 # The image preinstalls these; any other package npm or npx names comes from
 # the registry.
-PREINSTALLED = {"vitest", "fast-check", "tsx", "esbuild"}
+PREINSTALLED = {"vitest", "fast-check", "tsx", "esbuild", "typescript"}
+# Commands a preinstalled package provides under another name, which npx runs
+# from node_modules/.bin. Only the bare name: with a version (tsc@2.0.4) npx
+# fetches the registry package of that name.
+PREINSTALLED_BINS = {"tsc"}
 
 
 def package_name(spec):
@@ -704,7 +709,7 @@ def package_fetches(command):
                     named.append(w)
                 break
         for w in named:
-            if package_name(w) not in PREINSTALLED:
+            if w not in PREINSTALLED_BINS and package_name(w) not in PREINSTALLED:
                 yield f"npx {w}"
 
 
@@ -831,7 +836,9 @@ run_one() {
   done <<< "$files"
 
   local -a command_line docker_line
-  agent_command command_line "$agent" "$(level_prompt "$fn" "$level")" "$budget"
+  local prompt
+  prompt=$(level_prompt "$fn" "$level")
+  agent_command command_line "$agent" "$prompt" "$budget"
   container_command docker_line "$agent" "$root" "${command_line[@]}"
   local cli
   cli=$(agent_cli_version "$agent")
@@ -878,14 +885,28 @@ run_one() {
     impl_present=true
   fi
 
+  # The rollout is the full Codex session (every tool call and its output),
+  # which codex exec --json leaves out; the scratch CODEX_HOME holding it is
+  # removed when the run ends. Only regular files are read, so a link the
+  # agent planted there cannot copy one of the operator's files.
+  # A session that failed before it started has no sessions/ at all.
+  if [[ -n "$codex_home" && -d "$codex_home/sessions" ]]; then
+    chmod -R u+rwX "$codex_home"
+    local rollouts
+    rollouts=$(find "$codex_home/sessions" -type f -name 'rollout-*.jsonl' | sort)
+    if [[ -n "$rollouts" ]]; then
+      while read -r rollout; do cat "$rollout"; done <<< "$rollouts" > "$dir/codex_session.jsonl"
+    fi
+  fi
+
   local fields
   fields=$(summarise "$agent" "$dir/transcript.jsonl" "$root/status.json" "$codex_home" "$dir/final_message.txt")
   local base
   base=$(python3 -c 'import json, sys
-fn, level, agent, rep, cli, impl_present, impl_refused = sys.argv[1:8]
-print(json.dumps({"fn": fn, "level": level, "agent": agent, "rep": int(rep), "cli": cli,
+fn, level, agent, rep, prompt, cli, impl_present, impl_refused = sys.argv[1:9]
+print(json.dumps({"fn": fn, "level": level, "agent": agent, "rep": int(rep), "prompt": prompt, "cli": cli,
                   "impl_present": impl_present == "true", "impl_refused": impl_refused or None}))' \
-    "$fn" "$level" "$agent" "$rep" "$cli" "$impl_present" "$impl_refused")
+    "$fn" "$level" "$agent" "$rep" "$prompt" "$cli" "$impl_present" "$impl_refused")
   write_result "$dir/result.json" "$base" "$fields"
   case "$STOP_SIGNAL" in
     HUP) exit 129 ;;
