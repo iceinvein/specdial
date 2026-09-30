@@ -1,0 +1,6 @@
+node_modules/
+runs/*/transcript.jsonl
+runs/*/stderr.txt
+runs/*/final_message.txt
+__pycache__/
+.sluice/
