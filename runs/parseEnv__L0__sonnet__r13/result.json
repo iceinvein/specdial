@@ -1,0 +1,56 @@
+{
+  "fn": "parseEnv",
+  "level": "L0",
+  "agent": "sonnet",
+  "rep": 13,
+  "prompt": "Implement `parseEnv` in `src/parseEnv.ts`. The request is in `TICKET.md`.",
+  "cli": "2.1.285 (Claude Code)",
+  "impl_present": true,
+  "impl_refused": null,
+  "model": "claude-sonnet-5-5",
+  "effort": null,
+  "is_error": false,
+  "cost_usd": 0.018050999999999998,
+  "turns": 5,
+  "codex_steps": null,
+  "usage": {
+    "input_tokens": 8,
+    "cache_creation_input_tokens": 503,
+    "cache_read_input_tokens": 34115,
+    "output_tokens": 920,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 503,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 323,
+        "cache_read_input_tokens": 8701,
+        "cache_creation_input_tokens": 503,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 503
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+  },
+  "contamination": [],
+  "external_fetches": [],
+  "timed_out": false,
+  "interrupted": null,
+  "exit_code": 0,
+  "wall_s": 12.117
+}
