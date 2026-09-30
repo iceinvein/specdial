@@ -66,6 +66,12 @@ class CheckTasks(unittest.TestCase):
     def test_hand_written_input_with_generated_category_fails(self):
         self.assert_fails("hand-written-generated-category", "hand-written input h007 has category generated")
 
+    def test_two_inputs_with_equal_args_fail(self):
+        self.assert_fails("duplicate-args", "duplicate args in h012 and g0003")
+
+    def test_number_beyond_max_safe_integer_fails(self):
+        self.assert_fails("unsafe-number", "unsafe number in h020")
+
     def test_reference_that_does_not_load_fails(self):
         self.assert_fails("reference-noload", "reference does not load")
 

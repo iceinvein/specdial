@@ -117,7 +117,21 @@ const textArb = fc
   .tuple(fc.array(lineArb, { minLength: 1, maxLength: 6 }), fc.constantFrom("\n", "\n", "\r\n"))
   .map(([lines, eol]) => lines.join(eol));
 
-const generated = fc.sample(textArb, { seed: SEED, numRuns: GENERATED });
+// Distinct from each other and from every hand-written input, because
+// check_tasks.py refuses a corpus with two equal args.
+function generatedTexts(): string[] {
+  const seen = new Set(handWritten.map(([, text]) => text));
+  const out: string[] = [];
+  for (const text of fc.sample(textArb, { seed: SEED, numRuns: 5000 })) {
+    if (seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+    if (out.length === GENERATED) return out;
+  }
+  throw new Error(`only ${out.length} distinct generated inputs`);
+}
+
+const generated = generatedTexts();
 
 const inputs = [
   ...handWritten.map(([category, text], i) => ({

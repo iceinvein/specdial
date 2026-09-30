@@ -37,7 +37,6 @@ const handWritten: [string, Row[]][] = [
   ["number-zero", [{ zero: 0, text: "0" }]],
   ["number-decimal", [{ ratio: 0.125, tax: 19.99 }]],
   ["number-float-repr", [{ sum: 0.30000000000000004 }]],
-  ["number-exponent", [{ big: 1e21, tiny: 1e-7 }]],
   ["number-large-integer", [{ max: 9007199254740991, min: -9007199254740991 }]],
   ["number-negative-decimal", [{ delta: -3.75 }]],
 
@@ -69,6 +68,7 @@ const handWritten: [string, Row[]][] = [
   ["line-join-lf-trailing-newline", [{ solo: "one" }]],
   ["line-join-lf-trailing-newline", [{ r: "a" }, { r: "b" }]],
   ["quoted-fields-many-rows", [{ t: "a,b", u: 'c"d' }, { t: "e\nf", u: "plain" }]],
+  ["number-exponent", [{ tiny: 1e-7, small: 1.5e-10 }]],
 ];
 
 const keyPool = ["id", "name", "note", "qty", "price", "a,b", "tag"];
@@ -85,7 +85,31 @@ const rows = fc.oneof(
   { weight: 9, arbitrary: fc.array(row, { minLength: 1, maxLength: 6 }) },
 );
 
-const generated = fc.sample(rows, { seed: 20260930, numRuns: 500 });
+// Keys sorted, matching how check_tasks.py compares args.
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v) =>
+    v !== null && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+}
+
+// Distinct from each other and from every hand-written input, because
+// check_tasks.py refuses a corpus with two equal args.
+function generatedRows(): Row[][] {
+  const seen = new Set(handWritten.map(([, args]) => canonical([args])));
+  const out: Row[][] = [];
+  for (const args of fc.sample(rows, { seed: 20260930, numRuns: 5000 })) {
+    const key = canonical([args]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(args);
+    if (out.length === 500) return out;
+  }
+  throw new Error(`only ${out.length} distinct generated inputs`);
+}
+
+const generated = generatedRows();
 
 const inputs: Input[] = [
   ...handWritten.map(([category, args], i): Input => ({
