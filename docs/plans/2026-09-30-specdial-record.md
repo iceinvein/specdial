@@ -104,3 +104,10 @@
   $0.042, 9 turns, 14 s, clean; its implementation's signature hash equals the
   reference's (35db7a14...), so the run, copy-back and evaluator agree end to
   end.
+
+## T13 pilot
+
+- Run by the controller rather than dispatched: it is a fixed sequence of
+  commands whose output is the deliverable, and the numbers belong in this
+  record. Agent runs start while T12's review is out (a read; the runs do not
+  depend on the scorer); scoring waits for the review to clear.
