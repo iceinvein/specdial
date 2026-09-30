@@ -1,0 +1,1 @@
+{"function": "parseEnv", "inputs": [{"id": "h001", "category": "plain", "args": ["loop"]}, {"id": "h002", "category": "plain", "args": ["A=1"]}]}
