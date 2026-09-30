@@ -25,11 +25,12 @@ RUN useradd --create-home --home-dir /home/candidate --shell /bin/bash candidate
 COPY --chown=candidate:candidate gitconfig /home/candidate/.gitconfig
 
 # The test dependencies, installed once so a run needs no registry to run its
-# tests. Each work dir links node_modules here. Owned by candidate because
-# vitest writes its cache under node_modules; every run is a fresh container,
-# so nothing one run writes here reaches another.
-COPY package.json /opt/deps/package.json
-RUN cd /opt/deps && npm install --no-audit --no-fund && npm cache clean --force \
+# tests. Each work dir links node_modules here. package-lock.json resolves the
+# same versions as the root lockfile, and npm ci installs exactly those. Owned
+# by candidate because vitest writes its cache under node_modules; every run
+# is a fresh container, so nothing one run writes here reaches another.
+COPY package.json package-lock.json /opt/deps/
+RUN cd /opt/deps && npm ci --no-audit --no-fund && npm cache clean --force \
  && chown -R candidate:candidate /opt/deps
 
 USER candidate

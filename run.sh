@@ -514,6 +514,7 @@ if agent == "codex":
                 effort = e["payload"].get("effort", effort)
     messages = [i["text"] for i in items if i.get("type") == "agent_message"]
     commands = [i["command"] for i in items if i.get("type") == "command_execution"]
+    written = [s for i in items if i.get("type") == "file_change" for s in strings(i)]
     final = messages[-1] if messages else None
     # One codex exec is one turn in Codex's own count, so turns is 1 for any
     # completed run; codex_steps (commands run plus messages sent) is the
@@ -534,6 +535,10 @@ else:
     commands = [c["input"]["command"] for e in events if e.get("type") == "assistant"
                 for c in e.get("message", {}).get("content", [])
                 if c.get("type") == "tool_use" and c.get("name") == "Bash" and "command" in c.get("input", {})]
+    written = [s for e in events if e.get("type") == "assistant"
+               for c in e.get("message", {}).get("content", [])
+               if c.get("type") == "tool_use" and c.get("name") in ("Write", "Edit")
+               for s in strings(c.get("input", {}))]
     final = answer.get("result") if answer else None
     fields = {"model": init.get("model"), "effort": None,
               "is_error": failed_run or result is None or bool(result.get("is_error")),
@@ -552,9 +557,12 @@ fields["contamination"] = [m for m in markers if m in said]
 # Any URL in a command the agent ran counts, since a fetch can go through
 # git, pip, or a one-line script as easily as curl; so does any gh command and
 # the target of any git push, clone or remote add, since those act on GitHub
-# (or another host) as whoever the session is logged in as. The npm
-# registry is how an agent installs dependencies. Reserved test domains,
-# bare hostnames and loopback cannot reach anyone else's server.
+# (or another host) as whoever the session is logged in as. So do a host
+# named without a scheme to curl, wget, git clone or fetch(, any URL written
+# into a file with Write, Edit or a Codex file change, and any package npm
+# or npx would pull from the registry beyond the four the image preinstalls.
+# Reserved test domains, bare hostnames and loopback cannot reach anyone
+# else's server.
 allowed_hosts = {"registry.npmjs.org", "0.0.0.0"}
 reserved_suffixes = (".example", ".test", ".invalid", ".localhost")
 
@@ -618,19 +626,102 @@ def git_targets(command):
         elif sub == "push":
             yield f"git push {target}"  # a remote named earlier, which could point anywhere
             continue
+        elif sub == "clone" and BARE_URL.fullmatch(target):
+            host = target.split("/", 1)[0].split(":", 1)[0]  # host.tld/path, no scheme
         else:
             continue  # clone or remote add of a relative local path
         if not ignored_host(host):
             yield target
 
 
+def urls(text):
+    """URLs with a scheme, and the argument of a fetch( call written without
+    one, whose host is not ignored."""
+    for url in re.findall(r"https?://[^\s'\"<>()\\;&|`]+", text):
+        if not ignored_host(urllib.parse.urlparse(url).hostname):
+            yield url
+    for m in re.finditer(r"\bfetch\(\s*['\"`]([^'\"`\s]+)", text):
+        if BARE_URL.fullmatch(m.group(1)) and not ignored_host(bare_host(m.group(1))):
+            yield m.group(1)
+
+
+# host.tld with an optional port and path, as curl and wget accept it.
+BARE_URL = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?::\d+)?(?:/\S*)?")
+# Options that take a value, so the value is not read as a URL.
+DOWNLOADER_VALUE_OPTIONS = {"-o", "--output", "-d", "--data", "--data-raw", "--data-binary", "-H", "--header",
+                            "-X", "--request", "-u", "--user", "-A", "--user-agent", "-e", "--referer", "-b",
+                            "--cookie", "-c", "--cookie-jar", "-T", "--upload-file", "-m", "--max-time",
+                            "-O", "--output-document", "-P", "--directory-prefix", "-U", "-w", "--write-out"}
+
+
+def bare_host(target):
+    return target.split("/", 1)[0].split(":", 1)[0]
+
+
+def downloader_targets(command):
+    """Arguments to curl or wget that name a host without a scheme."""
+    for m in re.finditer(STARTS + r"(curl|wget)(\s" + SEGMENT + ")", command):
+        skip = False
+        for w in shell_words(m.group(2)):
+            if skip:
+                skip = False
+            elif w in DOWNLOADER_VALUE_OPTIONS:
+                skip = True
+            elif not w.startswith("-") and "://" not in w and BARE_URL.fullmatch(w) and not ignored_host(bare_host(w)):
+                yield f"{m.group(1)} {w}"
+
+
+# The image preinstalls these; any other package npm or npx names comes from
+# the registry.
+PREINSTALLED = {"vitest", "fast-check", "tsx", "esbuild"}
+
+
+def package_name(spec):
+    """The package in an npm spec such as @scope/name@1.2 or name@^3."""
+    at = spec.find("@", 1)
+    return spec if at == -1 else spec[:at]
+
+
+def package_fetches(command):
+    for m in re.finditer(STARTS + r"npm\s+(install|i|add|pack|view)\b(" + SEGMENT + ")", command):
+        for w in shell_words(m.group(2)):
+            if not w.startswith("-") and package_name(w) not in PREINSTALLED:
+                yield f"npm {m.group(1)} {w}"
+    for m in re.finditer(STARTS + r"npx(\s" + SEGMENT + ")", command):
+        words, named, take = shell_words(m.group(1)), [], False
+        for w in words:
+            if take:
+                named.append(w)
+                take = False
+            elif w in ("-p", "--package"):
+                take = True
+            elif w.startswith("--package="):
+                named.append(w.split("=", 1)[1])
+            elif not w.startswith("-"):
+                # The command npx runs, which is itself the package unless
+                # -p named them; its arguments follow.
+                if not named:
+                    named.append(w)
+                break
+        for w in named:
+            if package_name(w) not in PREINSTALLED:
+                yield f"npx {w}"
+
+
 fetches = []
 for command in commands:
-    found = [url for url in re.findall(r"https?://[^\s'\"<>()\\;&|`]+", command)
-             if not ignored_host(urllib.parse.urlparse(url).hostname)]
+    found = list(urls(command))
     found += ["gh" + m.group(1).rstrip() for m in re.finditer(STARTS + r"gh(\s" + SEGMENT + ")", command)]
     found += list(git_targets(command))
+    found += list(downloader_targets(command))
+    found += list(package_fetches(command))
     for item in found:
+        if item not in fetches:
+            fetches.append(item)
+# A URL written into a file counts too: the agent's own code can fetch it
+# when a test runs.
+for text in written:
+    for item in urls(text):
         if item not in fetches:
             fetches.append(item)
 fields["external_fetches"] = fetches
@@ -767,13 +858,23 @@ run_one() {
   done
   [[ -f "$root/status.json" ]] || { echo "run_timed failed without recording a status" >&2; return 1; }
 
-  # The agent may have left files only its own user could read. Only a
-  # regular file counts as the implementation: a link the agent left could
-  # point at any of the operator's files once outside the container.
+  # The agent may have left files only its own user could read. The
+  # implementation is copied only if it resolves inside the work dir: a link
+  # the agent left, at src/<fn>.ts or at src/ itself, could point at any of
+  # the operator's files once outside the container.
   chmod -R u+rwX "$work"
-  local impl="$work/src/$fn.ts" impl_present=false
-  if [[ -f "$impl" && ! -L "$impl" ]]; then
-    cp "$impl" "$dir/impl.ts"
+  local impl="$work/src/$fn.ts" impl_present=false impl_refused="" work_real impl_real
+  work_real=$(realpath "$work")
+  if [[ ! -e "$impl" && ! -L "$impl" ]]; then
+    impl_refused="src/$fn.ts does not exist"
+  elif ! impl_real=$(realpath "$impl" 2> /dev/null); then
+    impl_refused="src/$fn.ts does not resolve on the host"
+  elif [[ "$impl_real" != "$work_real"/* ]]; then
+    impl_refused="src/$fn.ts resolves outside the work dir, to $impl_real"
+  elif [[ ! -f "$impl_real" ]]; then
+    impl_refused="src/$fn.ts is not a regular file"
+  else
+    cp "$impl_real" "$dir/impl.ts"
     impl_present=true
   fi
 
@@ -781,10 +882,10 @@ run_one() {
   fields=$(summarise "$agent" "$dir/transcript.jsonl" "$root/status.json" "$codex_home" "$dir/final_message.txt")
   local base
   base=$(python3 -c 'import json, sys
-fn, level, agent, rep, cli, impl_present = sys.argv[1:7]
+fn, level, agent, rep, cli, impl_present, impl_refused = sys.argv[1:8]
 print(json.dumps({"fn": fn, "level": level, "agent": agent, "rep": int(rep), "cli": cli,
-                  "impl_present": impl_present == "true"}))' \
-    "$fn" "$level" "$agent" "$rep" "$cli" "$impl_present")
+                  "impl_present": impl_present == "true", "impl_refused": impl_refused or None}))' \
+    "$fn" "$level" "$agent" "$rep" "$cli" "$impl_present" "$impl_refused")
   write_result "$dir/result.json" "$base" "$fields"
   case "$STOP_SIGNAL" in
     HUP) exit 129 ;;
