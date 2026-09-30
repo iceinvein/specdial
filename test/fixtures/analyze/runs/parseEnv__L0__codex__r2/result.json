@@ -1,0 +1,1 @@
+{"fn": "parseEnv", "level": "L0", "agent": "codex", "rep": 2, "cost_usd": null, "is_error": false, "impl_present": false, "contamination": [], "external_fetches": ["https://example.com"]}
