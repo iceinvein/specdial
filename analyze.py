@@ -17,6 +17,8 @@ single classes NOLOAD and ABSENT otherwise. Per (fn, level, agent) cell, per
   tout           runs whose agent session timed out (kept: the impl it left is
                  still what the agent produced)
   tmo            runs with an input that timed out; a flaky TIMEOUT adds a class
+  crash          runs with an input whose evaluator worker crashed (a CRASH
+                 output in signature.json)
   unsup, async   runs with unsupported > 0 and with async_errors > 0; an
                  $unsupported output can make different behaviours share a hash
 and, per cell, the corpus categories on which loaded runs disagree with the
@@ -28,11 +30,17 @@ and listed with the reason. The per-level row takes median k and mean eff
 only over pooled rows with a loaded run, and says how many it left out. Cost is totalled per agent over
 every run, excluded ones included, since the money was spent either way.
 
-Every score must come from the current tasks/<fn>/corpus.json (its corpus_sha)
-and all from one evaluator and image; otherwise this fails naming the runs.
+Every score must come from the current tasks/<fn>/corpus.json and
+tasks/<fn>/reference.ts (its corpus_sha and ref_src_sha), the current
+evaluate.ts (its evaluator_sha) and one image; otherwise this fails naming the
+runs.
 
-Usage: python3 analyze.py [--json out.json]
-Env: RUNS_DIR, TASKS_DIR (defaults runs/ and tasks/, as in score.py).
+--include-excluded computes every number with the excluded runs kept, to show
+how much the exclusions move them; the excluded runs are still listed.
+
+Usage: python3 analyze.py [--json out.json] [--include-excluded]
+Env: RUNS_DIR, TASKS_DIR, EVALUATOR (defaults runs/, tasks/ and evaluate.ts,
+as in score.py).
 """
 
 import argparse
@@ -49,7 +57,7 @@ ROOT = Path(__file__).resolve().parent
 FUNCTIONS = ["parseEnv", "toCsv", "globToRegex", "safeFilename", "formatDuration"]
 LEVELS = ["L0", "L1", "L2", "L3"]
 AGENTS = ["sonnet", "opus", "codex"]
-PROVENANCE_KEYS = ["corpus_sha", "evaluator_sha", "image_id"]
+PROVENANCE_KEYS = ["corpus_sha", "ref_src_sha", "evaluator_sha", "image_id"]
 
 
 class AnalysisError(Exception):
@@ -105,24 +113,30 @@ def load_run(run_dir: Path) -> dict:
     return run
 
 
-def provenance_problems(runs: list[dict], tasks_dir: Path) -> list[str]:
+def sha256_of(path: Path) -> str:
+    if not path.is_file():
+        raise AnalysisError(f"{path} is missing")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def provenance_problems(runs: list[dict], tasks_dir: Path, evaluator: Path) -> list[str]:
     problems = []
-    corpus_sha: dict[str, str] = {}
-    for fn in sorted({r["fn"] for r in runs}):
-        path = tasks_dir / fn / "corpus.json"
-        if not path.is_file():
-            raise AnalysisError(f"{path} is missing")
-        corpus_sha[fn] = hashlib.sha256(path.read_bytes()).hexdigest()
-    stale = [r["id"] for r in runs if r["corpus_sha"] != corpus_sha[r["fn"]]]
+    fns = sorted({r["fn"] for r in runs})
+    for key, filename in (("corpus_sha", "corpus.json"), ("ref_src_sha", "reference.ts")):
+        current = {fn: sha256_of(tasks_dir / fn / filename) for fn in fns}
+        stale = [r["id"] for r in runs if r[key] != current[r["fn"]]]
+        if stale:
+            problems.append(f"{key} differs from the current {filename} for {', '.join(stale)}")
+    evaluator_sha = sha256_of(evaluator)
+    stale = [r["id"] for r in runs if r["evaluator_sha"] != evaluator_sha]
     if stale:
-        problems.append(f"corpus_sha differs from the current corpus.json for {', '.join(stale)}")
-    for key in ("evaluator_sha", "image_id"):
-        by_value: dict[str, list[str]] = {}
-        for r in runs:
-            by_value.setdefault(r[key], []).append(r["id"])
-        if len(by_value) > 1:
-            groups = "; ".join(f"{value}: {', '.join(ids)}" for value, ids in by_value.items())
-            problems.append(f"{key} differs across runs, {groups}")
+        problems.append(f"evaluator_sha differs from the current {evaluator.name} for {', '.join(stale)}")
+    by_image: dict[str, list[str]] = {}
+    for r in runs:
+        by_image.setdefault(r["image_id"], []).append(r["id"])
+    if len(by_image) > 1:
+        groups = "; ".join(f"{value}: {', '.join(ids)}" for value, ids in by_image.items())
+        problems.append(f"image_id differs across runs, {groups}")
     return problems
 
 
@@ -168,6 +182,7 @@ def summarise(runs: list[dict], categories: list[str]) -> dict:
         "is_error": sum(1 for r in runs if r["is_error"]),
         "timed_out": sum(1 for r in runs if r["timed_out"]),
         "timeout_runs": sum(1 for r in runs if r["timeouts"]),
+        "crash_runs": sum(1 for r in runs if r["outputs"] is not None and "CRASH" in r["outputs"]),
         "late_async_runs": sum(1 for r in runs if r["late_async_errors"]),
         "unsupported_runs": sum(1 for r in runs if r["unsupported"]),
         "async_error_runs": sum(1 for r in runs if r["async_errors"]),
@@ -181,8 +196,8 @@ def corpus_categories(tasks_dir: Path, fn: str) -> list[str]:
     return [entry["category"] for entry in corpus["inputs"]]
 
 
-def analyse(runs: list[dict], tasks_dir: Path) -> dict:
-    included = [r for r in runs if r["reason"] is None]
+def analyse(runs: list[dict], tasks_dir: Path, include_excluded: bool) -> dict:
+    included = runs if include_excluded else [r for r in runs if r["reason"] is None]
     cells, pooled, levels = [], [], []
     for fn in FUNCTIONS:
         fn_runs = [r for r in included if r["fn"] == fn]
@@ -228,8 +243,8 @@ def analyse(runs: list[dict], tasks_dir: Path) -> dict:
         })
     excluded = [{"run": r["id"], "reason": r["reason"]} for r in runs if r["reason"] is not None]
     refused = [{"run": r["id"], "reason": r["refused"]} for r in included if r["refused"] is not None]
-    return {"cells": cells, "pooled": pooled, "levels": levels, "excluded": excluded, "refused": refused,
-            "cost": cost}
+    return {"include_excluded": include_excluded, "cells": cells, "pooled": pooled, "levels": levels,
+            "excluded": excluded, "refused": refused, "cost": cost}
 
 
 def fmt(value, digits: int = 2) -> str:
@@ -241,10 +256,10 @@ def fmt(value, digits: int = 2) -> str:
 
 
 COLUMNS = ["n", "loaded", "k", "noload", "absent", "effective", "modal_share", "agree_ref", "agree_ref_share",
-           "mean_agree_frac", "distinct_src", "is_error", "timed_out", "timeout_runs", "unsupported_runs",
-           "async_error_runs"]
+           "mean_agree_frac", "distinct_src", "is_error", "timed_out", "timeout_runs", "crash_runs",
+           "unsupported_runs", "async_error_runs"]
 HEADERS = ["N", "loaded", "k", "noload", "absent", "eff", "modal", "ref", "ref/N", "frac", "src", "err", "tout",
-           "tmo", "unsup", "async"]
+           "tmo", "crash", "unsup", "async"]
 
 
 def table(rows: list[list[str]]) -> str:
@@ -282,7 +297,7 @@ def print_report(report: dict) -> None:
         listed = ", ".join(f"{cat} ({c['categories'][cat]})" for cat in c["disagreeing"]) or "none"
         print(f"  {fn} {level} {agent}: {listed}")
 
-    print("\nExcluded runs")
+    print("\nExcluded runs, kept by --include-excluded" if report["include_excluded"] else "\nExcluded runs")
     for row in report["excluded"]:
         print(f"  {row['run']}: {row['reason']}")
     if not report["excluded"]:
@@ -300,9 +315,11 @@ def print_report(report: dict) -> None:
         print(f"  {row['agent']}: {total} over {row['runs']} runs, {row['runs_without_cost']} without a cost")
 
 
-def main(argv: list[str], runs_dir: Path, tasks_dir: Path) -> int:
+def main(argv: list[str], runs_dir: Path, tasks_dir: Path, evaluator: Path) -> int:
     parser = argparse.ArgumentParser(description="Summarise the scored runs.")
     parser.add_argument("--json", type=Path, help="also write the numbers as JSON to this path")
+    parser.add_argument("--include-excluded", action="store_true",
+                        help="keep the excluded runs in every number, to see what the exclusions change")
     args = parser.parse_args(argv)
     if not runs_dir.is_dir():
         print(f"FAIL {runs_dir} is not a directory", file=sys.stderr)
@@ -316,12 +333,12 @@ def main(argv: list[str], runs_dir: Path, tasks_dir: Path) -> int:
         return 1
     try:
         runs = [load_run(d) for d in run_dirs]
-        problems = provenance_problems(runs, tasks_dir)
+        problems = provenance_problems(runs, tasks_dir, evaluator)
         if problems:
             for problem in problems:
                 print(f"FAIL {problem}", file=sys.stderr)
             return 1
-        report = analyse(runs, tasks_dir)
+        report = analyse(runs, tasks_dir, args.include_excluded)
     except AnalysisError as error:
         print(f"FAIL {error}", file=sys.stderr)
         return 1
@@ -337,4 +354,5 @@ if __name__ == "__main__":
         sys.argv[1:],
         Path(os.environ.get("RUNS_DIR", ROOT / "runs")),
         Path(os.environ.get("TASKS_DIR", ROOT / "tasks")),
+        Path(os.environ.get("EVALUATOR", ROOT / "evaluate.ts")),
     ))

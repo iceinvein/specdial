@@ -6,8 +6,9 @@ input, with an $unsupported output), r6 does not load. r7 is contaminated and
 r8 errored without an impl, so both are excluded; r7's outputs also differ on
 a "plain" input, which must not show up anywhere.
 toCsv L0 opus: r1, r2 both H2.
-parseEnv L0: sonnet r1 hash P1, codex r1 hash P2 (differs on the "comment"
-input), codex r2 excluded for fetching a URL. Codex reports no cost.
+parseEnv L0: sonnet r1 hash P1, codex r1 hash P2 (its "comment" input
+crashed the evaluator's worker), codex r2 excluded for fetching a URL. Codex
+reports no cost.
 toCsv L1 codex: r1 is kept with a late async error; r2's one fetch is
 `npx tsc`, and any recorded fetch excludes a run.
 toCsv L1 opus: r1 hash H1T, one output a TIMEOUT, one late async error, and
@@ -16,7 +17,8 @@ parseEnv L1 sonnet: r1 does not load, r2 left no impl and did not error, so
 it is kept as ABSENT; r2 also has no cost. parseEnv L1 opus: r1's impl was a
 link outside the work dir, a refused copy-back kept as ABSENT. No parseEnv L1
 run loads, so that pooled row stays out of the L1 median and mean.
-Every score carries provenance matching the fixture corpora.
+Every score carries provenance matching the fixture corpora, references and
+evaluate.ts.
 
 Every expected value below is worked out by hand from those runs.
 
@@ -38,12 +40,13 @@ import analyze
 FIXTURE = Path(__file__).resolve().parent / "test" / "fixtures" / "analyze"
 
 
-def run_analyze(runs_dir: Path, tasks_dir: Path) -> tuple[int, str, str, dict | None]:
+def run_analyze(root: Path, *flags: str) -> tuple[int, str, str, dict | None]:
     out, err = io.StringIO(), io.StringIO()
     with tempfile.TemporaryDirectory() as tmp:
         json_path = Path(tmp) / "out.json"
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = analyze.main(["--json", str(json_path)], runs_dir, tasks_dir)
+            status = analyze.main(["--json", str(json_path), *flags], root / "runs", root / "tasks",
+                                  root / "evaluate.ts")
         report = json.loads(json_path.read_text()) if json_path.exists() else None
     return status, out.getvalue(), err.getvalue(), report
 
@@ -51,7 +54,7 @@ def run_analyze(runs_dir: Path, tasks_dir: Path) -> tuple[int, str, str, dict | 
 class FixtureAnalysis(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.status, cls.stdout, cls.stderr, cls.report = run_analyze(FIXTURE / "runs", FIXTURE / "tasks")
+        cls.status, cls.stdout, cls.stderr, cls.report = run_analyze(FIXTURE)
 
     def cell(self, fn: str, level: str, agent: str) -> dict:
         return next(c for c in self.report["cells"] if (c["fn"], c["level"], c["agent"]) == (fn, level, agent))
@@ -154,6 +157,14 @@ class FixtureAnalysis(unittest.TestCase):
         p = self.pooled("toCsv", "L1")
         self.assertEqual((p["timeout_runs"], p["late_async_runs"]), (1, 2))
 
+    def test_runs_with_a_crashed_input_are_counted(self):
+        self.assertEqual((self.cell("parseEnv", "L0", "codex")["crash_runs"],
+                          self.cell("parseEnv", "L0", "sonnet")["crash_runs"],
+                          self.pooled("parseEnv", "L0")["crash_runs"]), (1, 0, 1))
+
+    def test_printed_table_shows_the_crash_count_under_its_header(self):
+        self.assertEqual(self.printed_row("fn ", "parseEnv  L0     codex")["crash"], "1")
+
     def test_refused_copy_back_is_kept_as_absent_and_listed_with_its_reason(self):
         c = self.cell("parseEnv", "L1", "opus")
         self.assertEqual((c["n"], c["absent"]), (1, 1))
@@ -172,12 +183,15 @@ class FixtureAnalysis(unittest.TestCase):
         self.assertEqual(self.printed_row("fn ", "toCsv     L0     sonnet"), {
             "fn": "toCsv", "level": "L0", "agent": "sonnet", "N": "6", "loaded": "5", "k": "3", "noload": "1",
             "absent": "0", "eff": "2.38", "modal": "0.67", "ref": "4", "ref/N": "0.67", "frac": "0.93", "src": "4",
-            "err": "1", "tout": "0", "tmo": "0", "unsup": "1", "async": "1",
+            "err": "1", "tout": "0", "tmo": "0", "crash": "0", "unsup": "1", "async": "1",
         })
 
     def test_printed_level_row_shows_median_k_with_two_decimals(self):
         row = self.printed_row("level ", "L1 ")
         self.assertEqual((row["median k"], row["left out"]), ("2.00", "1"))
+
+    def test_report_says_the_excluded_runs_were_left_out(self):
+        self.assertFalse(self.report["include_excluded"])
 
     def test_contaminated_fetching_and_implless_errored_runs_are_excluded_with_reasons(self):
         self.assertEqual(self.report["excluded"], [
@@ -222,7 +236,7 @@ class Provenance(unittest.TestCase):
             score_path = root / "runs" / run / "score.json"
             score = json.loads(score_path.read_text())
             score_path.write_text(json.dumps({**score, field: value}) + "\n")
-            status, _, stderr, report = run_analyze(root / "runs", root / "tasks")
+            status, _, stderr, report = run_analyze(root)
         return status, stderr, report
 
     def test_score_of_a_different_corpus_fails_naming_the_run(self):
@@ -237,11 +251,74 @@ class Provenance(unittest.TestCase):
         self.assertIn("parseEnv__L1__sonnet__r1", stderr)
         self.assertIn("evaluator_sha", stderr)
 
+    def test_score_of_a_different_reference_fails_naming_the_run(self):
+        status, stderr, report = self.analyse_with("parseEnv__L0__sonnet__r1", "ref_src_sha", "0" * 64)
+        self.assertEqual((status, report), (1, None))
+        self.assertIn("parseEnv__L0__sonnet__r1", stderr)
+        self.assertIn("ref_src_sha", stderr)
+
+    def test_edited_reference_fails_naming_every_run_of_that_function(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "analyze"
+            shutil.copytree(FIXTURE, root)
+            with (root / "tasks" / "toCsv" / "reference.ts").open("a") as reference:
+                reference.write("// edited after scoring\n")
+            status, _, stderr, report = run_analyze(root)
+        self.assertEqual((status, report), (1, None))
+        self.assertIn("ref_src_sha", stderr)
+        self.assertIn("toCsv__L0__opus__r1", stderr)
+        self.assertIn("toCsv__L1__opus__r1", stderr)
+        self.assertNotIn("parseEnv__", stderr)
+
+    def test_edited_evaluator_fails_naming_the_runs_even_when_all_scores_agree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "analyze"
+            shutil.copytree(FIXTURE, root)
+            with (root / "evaluate.ts").open("a") as evaluator:
+                evaluator.write("// edited after scoring\n")
+            status, _, stderr, report = run_analyze(root)
+        self.assertEqual((status, report), (1, None))
+        self.assertIn("evaluator_sha", stderr)
+        self.assertIn("parseEnv__L0__sonnet__r1", stderr)
+        self.assertIn("toCsv__L1__codex__r1", stderr)
+
     def test_scores_from_different_images_fail_naming_the_run(self):
         status, stderr, report = self.analyse_with("toCsv__L1__opus__r1", "image_id", "sha256:image-2")
         self.assertEqual((status, report), (1, None))
         self.assertIn("toCsv__L1__opus__r1", stderr)
         self.assertIn("image_id", stderr)
+
+
+class IncludeExcluded(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.status, cls.stdout, cls.stderr, cls.report = run_analyze(FIXTURE, "--include-excluded")
+
+    def cell(self, fn: str, level: str, agent: str) -> dict:
+        return next(c for c in self.report["cells"] if (c["fn"], c["level"], c["agent"]) == (fn, level, agent))
+
+    def test_analysis_succeeds(self):
+        self.assertEqual(self.status, 0, self.stderr)
+
+    def test_excluded_runs_are_counted_in_their_cell(self):
+        # toCsv L0 sonnet gains r7 (hash X) and r8 (ABSENT): H1 x4, H2, NOLOAD, X, ABSENT.
+        c = self.cell("toCsv", "L0", "sonnet")
+        self.assertEqual((c["n"], c["k"], c["absent"], c["agree_ref"]), (8, 5, 1, 4))
+
+    def test_excluded_runs_move_the_level_row(self):
+        # L0 pooled: toCsv 10 runs, k 5 (H1, H2, NOLOAD, X, ABSENT); parseEnv 3 runs, k 3 (P1, P2, ABSENT).
+        level = next(r for r in self.report["levels"] if r["level"] == "L0")
+        self.assertEqual((level["n"], level["median_k"], level["absent"]), (13, 4.0, 2))
+
+    def test_excluded_run_outputs_join_the_disagreeing_categories(self):
+        self.assertEqual(self.cell("toCsv", "L0", "sonnet")["disagreeing"], ["plain", "quoted"])
+
+    def test_report_says_the_excluded_runs_were_kept(self):
+        self.assertTrue(self.report["include_excluded"])
+        self.assertEqual([row["run"] for row in self.report["excluded"]], [
+            "parseEnv__L0__codex__r2", "toCsv__L0__sonnet__r7", "toCsv__L0__sonnet__r8", "toCsv__L1__codex__r2",
+        ])
+        self.assertIn("kept by --include-excluded", self.stdout)
 
 
 class UnscoredRun(unittest.TestCase):
@@ -250,7 +327,7 @@ class UnscoredRun(unittest.TestCase):
             root = Path(tmp) / "analyze"
             shutil.copytree(FIXTURE, root)
             (root / "runs" / "toCsv__L0__opus__r1" / "score.json").unlink()
-            status, _, stderr, report = run_analyze(root / "runs", root / "tasks")
+            status, _, stderr, report = run_analyze(root)
         self.assertEqual(status, 1)
         self.assertIn("toCsv__L0__opus__r1", stderr)
         self.assertIsNone(report)
