@@ -1,0 +1,12 @@
+export function formatDuration(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return '–'
+  if (ms < 1000) return `${String(ms)}ms`
+
+  const seconds = ms / 1000
+  if (seconds < 10) return `${seconds.toFixed(1)}s`
+  if (seconds < 60) return `${Math.floor(seconds + 0.5)}s`
+
+  const minutes = Math.floor(seconds / 60)
+  const remainder = Math.floor(seconds - minutes * 60 + 0.5)
+  return `${minutes}m ${remainder}s`
+}
