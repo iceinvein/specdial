@@ -181,3 +181,9 @@
 - Noted for the post: Sonnet is near-deterministic (all 3 L3 runs share one
   source hash); for formatDuration, L3 added nothing over L2 except flipping
   9950 via toFixed.
+- Corpus rules landed (43fbb09, 309e597): formatDuration 65 + 500 (dropped
+  h066, h067), toCsv 54 + 500 (1e21 input replaced by a safe exponent-form
+  input h054), others unchanged in hand-written count; all 500 generated are
+  distinct and safe. Known and accepted: duplicate detection sorts object keys,
+  so toCsv's generator skips rows that differ only in key order, slightly
+  thinning key-order variety; hand-written key-order inputs are unaffected.
