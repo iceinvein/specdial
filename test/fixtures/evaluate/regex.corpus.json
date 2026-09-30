@@ -1,0 +1,4 @@
+{"function": "toRegex",
+ "inputs": [{"id": "h001", "category": "probe", "args": ["*.ts"],
+             "probe": ["a.ts", "a.ts", "dir/a.ts", "a.js"]},
+            {"id": "h002", "category": "no-probe", "args": ["*.md"]}]}

@@ -1,0 +1,4 @@
+{"function": "later",
+ "inputs": [{"id": "h001", "category": "rejected", "args": [1]},
+            {"id": "h002", "category": "resolved", "args": [2]},
+            {"id": "h003", "category": "plain", "args": [3]}]}

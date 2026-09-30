@@ -1,0 +1,5 @@
+{"function": "double",
+ "inputs": [{"id": "h001", "category": "ok", "args": [1]},
+            {"id": "h002", "category": "hangs", "args": [2]},
+            {"id": "h003", "category": "ok", "args": [3]},
+            {"id": "h004", "category": "ok", "args": [4]}]}

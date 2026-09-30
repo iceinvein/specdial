@@ -1,0 +1,7 @@
+{"function": "odd",
+ "inputs": [{"id": "h001", "category": "map", "args": ["map"]},
+            {"id": "h002", "category": "bigint", "args": ["bigint"]},
+            {"id": "h003", "category": "function", "args": ["function"]},
+            {"id": "h004", "category": "symbol", "args": ["symbol"]},
+            {"id": "h005", "category": "instance", "args": ["instance"]},
+            {"id": "h006", "category": "nested", "args": ["nested"]}]}

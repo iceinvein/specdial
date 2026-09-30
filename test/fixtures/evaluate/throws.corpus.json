@@ -1,0 +1,4 @@
+{"function": "strictLength",
+ "inputs": [{"id": "h001", "category": "ok", "args": ["abc"]},
+            {"id": "h002", "category": "rejected", "args": ["bad"]},
+            {"id": "h003", "category": "ok", "args": ["abcd"]}]}

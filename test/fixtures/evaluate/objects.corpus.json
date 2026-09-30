@@ -1,0 +1,3 @@
+{"function": "describe",
+ "inputs": [{"id": "h001", "category": "plain", "args": ["ab"]},
+            {"id": "h002", "category": "empty", "args": [""]}]}
