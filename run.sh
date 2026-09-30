@@ -690,6 +690,9 @@ def package_name(spec):
 def package_fetches(command):
     for m in re.finditer(STARTS + r"npm\s+(install|i|add|pack|view)\b(" + SEGMENT + ")", command):
         for w in shell_words(m.group(2)):
+            # A redirection such as 2>&1 ends the argument list.
+            if re.match(r"\d*[<>]", w):
+                break
             if not w.startswith("-") and package_name(w) not in PREINSTALLED:
                 yield f"npm {m.group(1)} {w}"
     for m in re.finditer(STARTS + r"npx(\s" + SEGMENT + ")", command):
