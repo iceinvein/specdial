@@ -13,7 +13,7 @@ const LOAD_TIMEOUT_MS = 10_000;
 
 type CorpusInput = { id: string; args: unknown[]; probe?: string[] };
 type Corpus = { function: string; inputs: CorpusInput[] };
-type Output = { ok: unknown } | "THROW" | "TIMEOUT";
+type Output = { ok: unknown } | "THROW" | "TIMEOUT" | "CRASH";
 
 type WorkerSetup = { implUrl: string; functionName: string };
 type LoadMessage = { type: "load"; ok: boolean };
@@ -57,7 +57,7 @@ function canon(value: unknown, probe: string[] | undefined): unknown {
     const keys = Object.keys(value).sort();
     return Object.fromEntries(keys.map((k) => [k, canon((value as Record<string, unknown>)[k], undefined)]));
   }
-  throw new Error(`evaluate: cannot canonicalise a returned value of type ${describeType(value)}`);
+  return { $unsupported: unsupportedName(value) };
 }
 
 function isPlainObject(value: object): boolean {
@@ -65,9 +65,13 @@ function isPlainObject(value: object): boolean {
   return proto === Object.prototype || proto === null;
 }
 
-function describeType(value: unknown): string {
-  if (typeof value === "object" && value !== null) return value.constructor?.name ?? "object";
-  return typeof value;
+function unsupportedName(value: unknown): string {
+  if (typeof value !== "object" && typeof value !== "function") return typeof value;
+  const name = (value as { constructor?: { name?: unknown } }).constructor?.name;
+  if (typeof name === "string" && name !== "") return name;
+  // No usable constructor (for example Object.create(proto)): fall back to the
+  // built-in tag, such as "Object".
+  return Object.prototype.toString.call(value).slice("[object ".length, -1);
 }
 
 async function runWorker(): Promise<void> {
@@ -99,19 +103,25 @@ async function runWorker(): Promise<void> {
       port.postMessage({ type: "result", output: JSON.stringify("THROW") } satisfies ResultMessage);
       return;
     }
-    // Canonicalising stays outside the try: a failure here is a harness
-    // error, not the implementation throwing.
+    // The Promise is recorded, not awaited; without a handler its rejection
+    // would kill the worker later and be charged to a different input.
+    if (returned instanceof Promise) returned.then(undefined, () => {});
+    // Canonicalising stays outside the try: a getter that throws or a cycle
+    // kills the worker, which the main thread records as CRASH.
     const output = JSON.stringify({ ok: canon(returned, input.probe) });
     port.postMessage({ type: "result", output } satisfies ResultMessage);
   });
 }
 
 // Wraps one worker so the main thread can await its next message, a timeout,
-// or the worker dying, whichever comes first.
+// or the worker dying, whichever comes first. Dying before the worker starts
+// running is a harness error; dying after that is the implementation's doing.
 class ImplWorker {
   private worker: Worker;
+  private online = false;
+  dead = false;
   private pending: {
-    resolve: (message: LoadMessage | ResultMessage) => void;
+    resolve: (message: LoadMessage | ResultMessage | "CRASH") => void;
     reject: (error: Error) => void;
   } | null = null;
 
@@ -120,22 +130,28 @@ class ImplWorker {
     // The implementation's own console output must not reach our stdout.
     this.worker.stdout.resume();
     this.worker.stderr.resume();
+    this.worker.on("online", () => {
+      this.online = true;
+    });
     this.worker.on("message", (message: LoadMessage | ResultMessage) => {
       const pending = this.pending;
       this.pending = null;
       pending?.resolve(message);
     });
-    this.worker.on("error", (error) => this.fail(error));
-    this.worker.on("exit", (code) => this.fail(new Error(`evaluate: worker exited with code ${code}`)));
+    this.worker.on("error", (error) => this.die(error));
+    this.worker.on("exit", (code) => this.die(new Error(`evaluate: worker exited with code ${code}`)));
   }
 
-  private fail(error: Error): void {
+  private die(error: Error): void {
+    this.dead = true;
     const pending = this.pending;
     this.pending = null;
-    pending?.reject(error);
+    if (!pending) return;
+    if (this.online) pending.resolve("CRASH");
+    else pending.reject(new Error(`evaluate: worker could not start: ${error.message}`));
   }
 
-  next(timeoutMs: number): Promise<LoadMessage | ResultMessage | "TIMEOUT"> {
+  next(timeoutMs: number): Promise<LoadMessage | ResultMessage | "TIMEOUT" | "CRASH"> {
     return new Promise((resolvePromise, rejectPromise) => {
       const timer = setTimeout(() => {
         this.pending = null;
@@ -159,7 +175,7 @@ class ImplWorker {
   }
 
   async terminate(): Promise<void> {
-    this.worker.removeAllListeners("exit");
+    this.worker.removeAllListeners();
     await this.worker.terminate();
   }
 }
@@ -167,7 +183,7 @@ class ImplWorker {
 async function startWorker(setup: WorkerSetup): Promise<ImplWorker | null> {
   const worker = new ImplWorker(setup);
   const message = await worker.next(LOAD_TIMEOUT_MS);
-  if (message === "TIMEOUT" || message.type !== "load" || !message.ok) {
+  if (message === "TIMEOUT" || message === "CRASH" || message.type !== "load" || !message.ok) {
     await worker.terminate();
     return null;
   }
@@ -200,15 +216,21 @@ async function main(): Promise<void> {
   let worker: ImplWorker | null = first;
   const outputs: Output[] = [];
   for (const input of corpus.inputs) {
+    // A worker can also die between inputs, from async work a previous call
+    // left behind; that input already has its output, so just replace it.
+    if (worker?.dead) {
+      await worker.terminate();
+      worker = null;
+    }
     if (!worker) {
-      // Started lazily so a timeout on the last input does not load a worker nobody uses.
+      // Started lazily so a timeout or crash on the last input does not load a worker nobody uses.
       worker = await startWorker(setup);
-      if (!worker) throw new Error(`evaluate: ${implPath} loaded once but failed to reload after a timeout`);
+      if (!worker) throw new Error(`evaluate: ${implPath} loaded once but failed to reload`);
     }
     worker.send(input);
     const message = await worker.next(INPUT_TIMEOUT_MS);
-    if (message === "TIMEOUT") {
-      outputs.push("TIMEOUT");
+    if (message === "TIMEOUT" || message === "CRASH") {
+      outputs.push(message);
       await worker.terminate();
       worker = null;
       continue;

@@ -79,6 +79,37 @@ describe("evaluate.ts", { timeout: 30_000 }, () => {
     ]);
   });
 
+  test("values the canonical rules do not cover are recorded as $unsupported at their position", () => {
+    const result = evaluateOk("unsupported.ts", "unsupported.corpus.json");
+    expect(JSON.stringify(result.outputs)).toBe(
+      "[" +
+        [
+          '{"ok":{"$unsupported":"Map"}}',
+          '{"ok":{"$unsupported":"bigint"}}',
+          '{"ok":{"$unsupported":"Function"}}',
+          '{"ok":{"$unsupported":"symbol"}}',
+          '{"ok":{"$unsupported":"Point"}}',
+          '{"ok":{"tags":[{"$unsupported":"Set"},1],"when":{"$unsupported":"Date"}}}',
+        ].join(",") +
+        "]",
+    );
+  });
+
+  test("a returned Promise is recorded as unsupported without being awaited", () => {
+    const result = evaluateOk("promise.ts", "promise.corpus.json");
+    expect(result.outputs).toEqual([
+      { ok: { $unsupported: "Promise" } },
+      { ok: { $unsupported: "Promise" } },
+      { ok: 6 },
+    ]);
+  });
+
+  test("a worker that exits during an input is recorded as CRASH and later inputs still run", () => {
+    const result = evaluateOk("exits.ts", "exits.corpus.json");
+    expect(result.load).toBe("ok");
+    expect(result.outputs).toEqual([{ ok: 2 }, "CRASH", { ok: 6 }]);
+  });
+
   test("the hash is the sha256 of the outputs and ignores source formatting", () => {
     const expectedHash = sha256('[{"ok":2},{"ok":10}]');
     const a = evaluateOk("format-a.ts", "numbers.corpus.json");
