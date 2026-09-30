@@ -1,0 +1,8 @@
+{"function": "special",
+ "inputs": [{"id": "h001", "category": "negzero", "args": ["negzero"]},
+            {"id": "h002", "category": "nan", "args": ["nan"]},
+            {"id": "h003", "category": "inf", "args": ["inf"]},
+            {"id": "h004", "category": "neginf", "args": ["neginf"]},
+            {"id": "h005", "category": "undef", "args": ["undef"]},
+            {"id": "h006", "category": "nested", "args": ["nested"]},
+            {"id": "h007", "category": "undefined-arg", "args": [{"$undefined": true}]}]}
