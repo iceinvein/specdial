@@ -1,0 +1,29 @@
+{
+  "fn": "safeFilename",
+  "level": "L1",
+  "agent": "codex",
+  "rep": 7,
+  "prompt": "Implement `safeFilename` in `src/safeFilename.ts`. The request is in `TICKET.md`, and `src/safeFilename.test.ts` has tests it must pass. `npx vitest run` runs them.",
+  "cli": "codex-cli 0.159.2",
+  "impl_present": true,
+  "impl_refused": null,
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "is_error": false,
+  "cost_usd": null,
+  "turns": 1,
+  "codex_steps": 6,
+  "usage": {
+    "input_tokens": 42507,
+    "cached_input_tokens": 40320,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 657,
+    "reasoning_output_tokens": 218
+  },
+  "contamination": [],
+  "external_fetches": [],
+  "timed_out": false,
+  "interrupted": null,
+  "exit_code": 0,
+  "wall_s": 44.294
+}

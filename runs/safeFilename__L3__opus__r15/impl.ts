@@ -1,0 +1,12 @@
+const FALLBACK_BASE = 'resume'
+
+export function safeFilename(raw: string, extension: string): string {
+  const base = raw
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+  const ext = extension.startsWith('.') ? extension : `.${extension}`
+  return `${base || FALLBACK_BASE}${ext}`
+}
