@@ -1,0 +1,1 @@
+{"fn": "toCsv", "level": "L1", "agent": "opus", "rep": 1, "cost_usd": 0.5, "is_error": true, "impl_present": true, "impl_refused": null, "timed_out": true, "contamination": [], "external_fetches": []}

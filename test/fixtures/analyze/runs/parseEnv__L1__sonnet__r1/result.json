@@ -1,0 +1,1 @@
+{"fn": "parseEnv", "level": "L1", "agent": "sonnet", "rep": 1, "cost_usd": 0.2, "is_error": false, "impl_present": true, "impl_refused": null, "timed_out": false, "contamination": [], "external_fetches": []}

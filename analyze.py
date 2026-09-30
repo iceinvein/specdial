@@ -5,32 +5,41 @@ A run's behaviour class is its signature hash when its impl loads, and the
 single classes NOLOAD and ABSENT otherwise. Per (fn, level, agent) cell, per
 (fn, level) pooled over agents, and per level across functions, this prints
   N              runs counted
+  loaded         runs whose impl loaded
   k              distinct behaviour classes (NOLOAD and ABSENT one each)
   eff            effective behaviours, exp of the Shannon entropy of the classes
   modal          share of runs in the largest class
-  ref            runs whose signature equals the reference's
+  ref, ref/N     runs whose signature equals the reference's, as a count and
+                 as a share of N
   frac           mean agree_frac over the runs that loaded
   src            distinct src_hash values
   err            runs with is_error kept because they left an impl
+  tout           runs whose agent session timed out (kept: the impl it left is
+                 still what the agent produced)
+  tmo            runs with an input that timed out; a flaky TIMEOUT adds a class
   unsup, async   runs with unsupported > 0 and with async_errors > 0; an
                  $unsupported output can make different behaviours share a hash
 and, per cell, the corpus categories on which loaded runs disagree with the
 number of distinct outputs each category saw. A run with contamination or
 external fetches, or one that errored without leaving an impl, is excluded
-from every number and listed with its reason; a fetch of the TypeScript
-compiler alone (npx tsc, npm install typescript) does not exclude a run, and
-the runs kept that way are counted per agent. Cost is totalled per agent over
+from every number and listed with its reason. A run whose impl was refused on
+copy-back (a link out of the work dir, not a regular file) is kept as ABSENT
+and listed with the reason. The per-level row takes median k and mean eff
+only over pooled rows with a loaded run, and says how many it left out. Cost is totalled per agent over
 every run, excluded ones included, since the money was spent either way.
+
+Every score must come from the current tasks/<fn>/corpus.json (its corpus_sha)
+and all from one evaluator and image; otherwise this fails naming the runs.
 
 Usage: python3 analyze.py [--json out.json]
 Env: RUNS_DIR, TASKS_DIR (defaults runs/ and tasks/, as in score.py).
 """
 
 import argparse
+import hashlib
 import json
 import math
 import os
-import re
 import statistics
 import sys
 from collections import Counter
@@ -40,11 +49,7 @@ ROOT = Path(__file__).resolve().parent
 FUNCTIONS = ["parseEnv", "toCsv", "globToRegex", "safeFilename", "formatDuration"]
 LEVELS = ["L0", "L1", "L2", "L3"]
 AGENTS = ["sonnet", "opus", "codex"]
-# npx or npm fetching the TypeScript compiler, as run.sh records it. An agent
-# type-checking its work downloads nothing that could hold the reference.
-TYPE_CHECKER_FETCH = re.compile(
-    r"(npx( -\S+)* (tsc|typescript)|npm (install|i|add)( -\S+)* typescript)(@\S+)?( -\S+)*"
-)
+PROVENANCE_KEYS = ["corpus_sha", "evaluator_sha", "image_id"]
 
 
 class AnalysisError(Exception):
@@ -60,16 +65,18 @@ def read_json(path: Path):
         raise AnalysisError(f"{path} is not JSON: {error}") from None
 
 
-def is_type_checker_fetch(fetch: str) -> bool:
-    return TYPE_CHECKER_FETCH.fullmatch(fetch) is not None
+def refusal(result: dict) -> str | None:
+    """Why run.sh refused to copy back an impl that was there; None when there was none to copy."""
+    reason = result["impl_refused"]
+    return None if reason == f"src/{result['fn']}.ts does not exist" else reason
 
 
 def exclusion_reason(result: dict) -> str | None:
     if result["contamination"]:
         return "contamination: " + ", ".join(result["contamination"])
-    if not all(is_type_checker_fetch(f) for f in result["external_fetches"]):
+    if result["external_fetches"]:
         return "external_fetches: " + ", ".join(result["external_fetches"])
-    if result["is_error"] and not result["impl_present"]:
+    if result["is_error"] and not result["impl_present"] and refusal(result) is None:
         return "is_error with no impl"
     return None
 
@@ -81,10 +88,13 @@ def load_run(run_dir: Path) -> dict:
         run = {
             "id": run_dir.name, "fn": result["fn"], "level": result["level"], "agent": result["agent"],
             "cost_usd": result["cost_usd"], "is_error": result["is_error"], "reason": exclusion_reason(result),
-            "fetched": bool(result["external_fetches"]),
+            "timed_out": result["timed_out"],
+            "refused": refusal(result),
             "load": score["load"], "hash": score["hash"], "agree_ref": score["agree_ref"],
             "agree_frac": score["agree_frac"], "src_hash": score["src_hash"],
             "unsupported": score["unsupported"], "async_errors": score["async_errors"],
+            "late_async_errors": score["late_async_errors"], "timeouts": score["timeouts"],
+            **{key: score[key] for key in PROVENANCE_KEYS},
         }
     except KeyError as error:
         raise AnalysisError(f"{run_dir.name}: result.json or score.json has no {error}") from None
@@ -93,6 +103,27 @@ def load_run(run_dir: Path) -> dict:
             raise AnalysisError(f"{run_dir.name}: unknown {field} {run[field]!r}")
     run["outputs"] = read_json(run_dir / "signature.json")["outputs"] if run["load"] == "ok" else None
     return run
+
+
+def provenance_problems(runs: list[dict], tasks_dir: Path) -> list[str]:
+    problems = []
+    corpus_sha: dict[str, str] = {}
+    for fn in sorted({r["fn"] for r in runs}):
+        path = tasks_dir / fn / "corpus.json"
+        if not path.is_file():
+            raise AnalysisError(f"{path} is missing")
+        corpus_sha[fn] = hashlib.sha256(path.read_bytes()).hexdigest()
+    stale = [r["id"] for r in runs if r["corpus_sha"] != corpus_sha[r["fn"]]]
+    if stale:
+        problems.append(f"corpus_sha differs from the current corpus.json for {', '.join(stale)}")
+    for key in ("evaluator_sha", "image_id"):
+        by_value: dict[str, list[str]] = {}
+        for r in runs:
+            by_value.setdefault(r[key], []).append(r["id"])
+        if len(by_value) > 1:
+            groups = "; ".join(f"{value}: {', '.join(ids)}" for value, ids in by_value.items())
+            problems.append(f"{key} differs across runs, {groups}")
+    return problems
 
 
 def behaviour(run: dict) -> str:
@@ -124,15 +155,20 @@ def summarise(runs: list[dict], categories: list[str]) -> dict:
     per_category = category_outputs(runs, categories)
     return {
         "n": n,
+        "loaded": len(loaded_fracs),
         "k": len(classes),
         "noload": classes["NOLOAD"],
         "absent": classes["ABSENT"],
         "effective": math.exp(entropy),
         "modal_share": max(classes.values()) / n,
         "agree_ref": sum(1 for r in runs if r["agree_ref"]),
+        "agree_ref_share": sum(1 for r in runs if r["agree_ref"]) / n,
         "mean_agree_frac": statistics.fmean(loaded_fracs) if loaded_fracs else None,
         "distinct_src": len({r["src_hash"] for r in runs if r["src_hash"] is not None}),
         "is_error": sum(1 for r in runs if r["is_error"]),
+        "timed_out": sum(1 for r in runs if r["timed_out"]),
+        "timeout_runs": sum(1 for r in runs if r["timeouts"]),
+        "late_async_runs": sum(1 for r in runs if r["late_async_errors"]),
         "unsupported_runs": sum(1 for r in runs if r["unsupported"]),
         "async_error_runs": sum(1 for r in runs if r["async_errors"]),
         "disagreeing": [c for c, count in per_category.items() if count > 1],
@@ -164,13 +200,16 @@ def analyse(runs: list[dict], tasks_dir: Path) -> dict:
             pooled.append({"fn": fn, "level": level, **summarise(level_runs, categories)})
     for level in LEVELS:
         rows = [p for p in pooled if p["level"] == level]
+        # A row with no loaded run reads as k=1 or 2 whatever the agents wrote.
+        measured = [p for p in rows if p["loaded"] > 0]
         if rows:
             levels.append({
                 "level": level,
-                "functions": len(rows),
+                "functions": len(measured),
+                "left_out": len(rows) - len(measured),
                 "n": sum(p["n"] for p in rows),
-                "median_k": statistics.median(p["k"] for p in rows),
-                "mean_effective": statistics.fmean(p["effective"] for p in rows),
+                "median_k": float(statistics.median(p["k"] for p in measured)) if measured else None,
+                "mean_effective": statistics.fmean(p["effective"] for p in measured) if measured else None,
                 "agree_ref": sum(p["agree_ref"] for p in rows),
                 "noload": sum(p["noload"] for p in rows),
                 "absent": sum(p["absent"] for p in rows),
@@ -188,11 +227,9 @@ def analyse(runs: list[dict], tasks_dir: Path) -> dict:
             "runs_without_cost": len(agent_runs) - len(known),
         })
     excluded = [{"run": r["id"], "reason": r["reason"]} for r in runs if r["reason"] is not None]
-    # A kept run that fetched anything fetched only type-checker packages.
-    ignored_fetches = [{"agent": agent, "runs": sum(1 for r in included if r["agent"] == agent and r["fetched"])}
-                       for agent in AGENTS if any(r["agent"] == agent for r in runs)]
-    return {"cells": cells, "pooled": pooled, "levels": levels, "excluded": excluded,
-            "ignored_fetches": ignored_fetches, "cost": cost}
+    refused = [{"run": r["id"], "reason": r["refused"]} for r in included if r["refused"] is not None]
+    return {"cells": cells, "pooled": pooled, "levels": levels, "excluded": excluded, "refused": refused,
+            "cost": cost}
 
 
 def fmt(value, digits: int = 2) -> str:
@@ -203,9 +240,11 @@ def fmt(value, digits: int = 2) -> str:
     return str(value)
 
 
-COLUMNS = ["n", "k", "noload", "absent", "effective", "modal_share", "agree_ref", "mean_agree_frac",
-           "distinct_src", "is_error", "unsupported_runs", "async_error_runs"]
-HEADERS = ["N", "k", "noload", "absent", "eff", "modal", "ref", "frac", "src", "err", "unsup", "async"]
+COLUMNS = ["n", "loaded", "k", "noload", "absent", "effective", "modal_share", "agree_ref", "agree_ref_share",
+           "mean_agree_frac", "distinct_src", "is_error", "timed_out", "timeout_runs", "unsupported_runs",
+           "async_error_runs"]
+HEADERS = ["N", "loaded", "k", "noload", "absent", "eff", "modal", "ref", "ref/N", "frac", "src", "err", "tout",
+           "tmo", "unsup", "async"]
 
 
 def table(rows: list[list[str]]) -> str:
@@ -231,10 +270,11 @@ def print_report(report: dict) -> None:
     print(table(rows))
 
     print("\nPer level, across functions")
-    level_rows = [["level", "functions", "N", "median k", "mean eff", "ref", "noload", "absent"]]
+    print("median k and mean eff over the pooled rows with a loaded run; left out: rows with none")
+    level_rows = [["level", "functions", "left out", "N", "median k", "mean eff", "ref", "noload", "absent"]]
     for row in report["levels"]:
-        level_rows.append([row["level"], *(fmt(row[k]) for k in
-                           ("functions", "n", "median_k", "mean_effective", "agree_ref", "noload", "absent"))])
+        level_rows.append([row["level"], *(fmt(row[k]) for k in ("functions", "left_out", "n", "median_k",
+                           "mean_effective", "agree_ref", "noload", "absent"))])
     print(table(level_rows))
 
     print("\nCategories where loaded runs disagree (distinct outputs)")
@@ -248,9 +288,11 @@ def print_report(report: dict) -> None:
     if not report["excluded"]:
         print("  none")
 
-    print("\nIgnored fetches")
-    for row in report["ignored_fetches"]:
-        print(f"  {row['agent']}: {row['runs']} runs kept whose only fetches were type-checker downloads")
+    print("\nRefused copy-back (kept as ABSENT)")
+    for row in report["refused"]:
+        print(f"  {row['run']}: {row['reason']}")
+    if not report["refused"]:
+        print("  none")
 
     print("\nCost by agent")
     for row in report["cost"]:
@@ -273,7 +315,13 @@ def main(argv: list[str], runs_dir: Path, tasks_dir: Path) -> int:
               file=sys.stderr)
         return 1
     try:
-        report = analyse([load_run(d) for d in run_dirs], tasks_dir)
+        runs = [load_run(d) for d in run_dirs]
+        problems = provenance_problems(runs, tasks_dir)
+        if problems:
+            for problem in problems:
+                print(f"FAIL {problem}", file=sys.stderr)
+            return 1
+        report = analyse(runs, tasks_dir)
     except AnalysisError as error:
         print(f"FAIL {error}", file=sys.stderr)
         return 1
