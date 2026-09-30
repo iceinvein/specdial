@@ -137,3 +137,15 @@
   analysis ignores type-checker fetches (tsc/typescript only) when excluding
   runs and prints how many runs that rule kept. The raw result.json keeps the
   flag.
+
+## T14 review
+
+- Fresh reviewer recomputed all 16 pilot rows independently: every number
+  matches. Sent back: timeouts not surfaced (a flaky TIMEOUT would add 1 to k
+  invisibly); all-noload cells read as k=1 and entered the level aggregates
+  (now a `loaded` column, and cells with no loaded run are left out of the
+  median/mean and counted); session timeouts and refused copy-backs surfaced;
+  provenance checked against the current corpus; ref reported as a share;
+  test gaps that let ABSENT, src null handling and column order go untested.
+- Decision: a run whose agent session timed out but left an impl is kept (it
+  is still what the agent produced), flagged in a column.
