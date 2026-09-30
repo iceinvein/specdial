@@ -111,3 +111,29 @@
   commands whose output is the deliverable, and the numbers belong in this
   record. Agent runs start while T12's review is out (a read; the runs do not
   depend on the scorer); scoring waits for the review to clear.
+
+## T12 review
+
+- Fresh reviewer: agreement maths and container parity hold (host and
+  container outputs byte-identical; globToRegex buggy 548/567 recomputed
+  independently). Sent back: stale caches were served silently after a corpus
+  edit (now provenance hashes and a loud failure); impls loaded as CommonJS
+  while the agent work dir is ESM; no memory/CPU/pids limits, which under
+  --jobs 4 could produce false TIMEOUTs counted as disagreement; repo mounted
+  whole into a container running agent code; non-atomic writes; src_hash
+  docstring overstated.
+- T14 merged (a8b4565); its review waits for real pilot scores so the reviewer
+  can check numbers on real data.
+
+## Pilot results (runs only; scoring waits on the T12 fixes)
+
+- 36/36 runs, probe clean, no is_error, every run left an impl, no
+  contamination. Claude cost $1.135 total: sonnet $0.0299 per run (mean wall
+  14.5 s), opus $0.0647 (24.8 s); codex reports no cost (72.6 s mean).
+- Projection for the full grid, Claude only: 300 x 0.0299 + 300 x 0.0647 =
+  about $28, well under the design's $115 estimate.
+- One external fetch: formatDuration L0 opus r3 ran `npx tsc`, which pulls
+  typescript from npm to type-check. Not a reference leak. Decision: the
+  analysis ignores type-checker fetches (tsc/typescript only) when excluding
+  runs and prints how many runs that rule kept. The raw result.json keeps the
+  flag.
