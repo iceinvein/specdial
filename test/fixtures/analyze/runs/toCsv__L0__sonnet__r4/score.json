@@ -1,1 +1,1 @@
-{"load": "ok", "hash": "H1", "agree_ref": true, "agree_frac": 1.0, "src_hash": "s2", "unsupported": 0, "async_errors": 0, "late_async_errors": 0}
+{"load": "ok", "hash": "H1", "agree_ref": true, "agree_frac": 1.0, "src_hash": "s2", "unsupported": 0, "async_errors": 0, "late_async_errors": 0, "timeouts": 0, "corpus_sha": "dc04d2995c6df4e8bf02661cb4c22b4f5be289c729f8023eb7b46118ef8e296c", "ref_src_sha": "ref-toCsv", "evaluator_sha": "evaluator-1", "image_id": "sha256:image-1"}

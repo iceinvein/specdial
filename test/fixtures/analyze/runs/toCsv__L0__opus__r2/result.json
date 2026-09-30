@@ -1,1 +1,1 @@
-{"fn": "toCsv", "level": "L0", "agent": "opus", "rep": 2, "cost_usd": 0.5, "is_error": false, "impl_present": true, "contamination": [], "external_fetches": []}
+{"fn": "toCsv", "level": "L0", "agent": "opus", "rep": 2, "cost_usd": 0.5, "is_error": false, "impl_present": true, "impl_refused": null, "timed_out": false, "contamination": [], "external_fetches": []}

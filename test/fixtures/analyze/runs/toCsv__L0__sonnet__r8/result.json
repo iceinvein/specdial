@@ -1,1 +1,1 @@
-{"fn": "toCsv", "level": "L0", "agent": "sonnet", "rep": 8, "cost_usd": 0.05, "is_error": true, "impl_present": false, "contamination": [], "external_fetches": []}
+{"fn": "toCsv", "level": "L0", "agent": "sonnet", "rep": 8, "cost_usd": 0.05, "is_error": true, "impl_present": false, "impl_refused": "src/toCsv.ts does not exist", "timed_out": false, "contamination": [], "external_fetches": []}

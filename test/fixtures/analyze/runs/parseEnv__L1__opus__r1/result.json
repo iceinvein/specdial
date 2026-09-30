@@ -1,0 +1,1 @@
+{"fn": "parseEnv", "level": "L1", "agent": "opus", "rep": 1, "cost_usd": 0.4, "is_error": true, "impl_present": false, "impl_refused": "src/parseEnv.ts resolves outside the work dir, to /etc/passwd", "timed_out": false, "contamination": [], "external_fetches": []}
