@@ -8,7 +8,8 @@ function evaluate(impl: string, corpus: string) {
   const result = spawnSync(
     "npx",
     ["tsx", "evaluate.ts", `${FIXTURES}/${impl}`, `${FIXTURES}/${corpus}`],
-    { encoding: "utf8", env: { ...process.env, TZ: "UTC" } },
+    // A hung evaluator is killed and shows up as a null status, not a stuck suite.
+    { encoding: "utf8", env: { ...process.env, TZ: "UTC" }, timeout: 20_000 },
   );
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -116,6 +117,48 @@ describe("evaluate.ts", { timeout: 30_000 }, () => {
     const b = evaluateOk("format-b.ts", "numbers.corpus.json");
     expect(a.hash).toBe(expectedHash);
     expect(b.hash).toBe(expectedHash);
+  });
+
+  test("an async error left by a call is counted against that input and does not change later outputs", () => {
+    const result = evaluateOk("microtask-error.ts", "microtask-error.corpus.json");
+    expect(result.outputs).toEqual([{ ok: 2 }, { ok: 4 }, { ok: 6 }]);
+    expect(result.async_errors).toEqual([0]);
+    expect(result.late_async_errors).toBe(0);
+  });
+
+  test("timer errors left behind by calls do not change the hash across evaluations", () => {
+    const expectedOutputs = Array.from({ length: 40 }, (_, i) => ({ ok: i + 1 }));
+    const expectedHash = sha256(JSON.stringify(expectedOutputs));
+    for (let run = 0; run < 5; run++) {
+      const result = evaluateOk("timer-error.ts", "timer-error.corpus.json");
+      expect(result.hash).toBe(expectedHash);
+    }
+  });
+
+  test("object keys are sorted by code unit, so uppercase sorts before lowercase", () => {
+    const result = evaluateOk("key-order.ts", "key-order.corpus.json");
+    expect(JSON.stringify(result.outputs[0])).toBe('{"ok":{"B":1,"a":1}}');
+  });
+
+  test("integer-like object keys serialise in ascending numeric order before other keys", () => {
+    const result = evaluateOk("key-order.ts", "key-order.corpus.json");
+    expect(JSON.stringify(result.outputs[1])).toBe('{"ok":{"2":1,"10":1,"b":1}}');
+  });
+
+  test("an input that runs for 1500 ms exceeds the 1000 ms limit and is recorded as TIMEOUT", () => {
+    const result = evaluateOk("slow.ts", "slow.corpus.json");
+    expect(result.outputs).toEqual(["TIMEOUT", { ok: 0 }]);
+  });
+
+  test("a RegExp nested in the result is written as source and flags even when the input has a probe", () => {
+    const result = evaluateOk("nested-regex.ts", "nested-regex.corpus.json");
+    expect(result.outputs).toEqual([{ ok: [{ $regex: "^a$", flags: "i" }] }]);
+  });
+
+  test("an unexpected message from the worker is a harness error that exits 2 rather than hanging", () => {
+    const result = evaluate("posts-message.ts", "posts-message.corpus.json");
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe("");
   });
 
   test("an unreadable corpus is a harness error with a non-zero exit", () => {

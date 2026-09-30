@@ -1,0 +1,2 @@
+{"function": "wrapped",
+ "inputs": [{"id": "h001", "category": "nested", "args": ["^a$"], "probe": ["a", "b"]}]}

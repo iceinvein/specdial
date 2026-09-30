@@ -1,5 +1,7 @@
 // Usage: npx tsx evaluate.ts <impl.ts> <corpus.json>
-// Prints {"load", "outputs", "hash"} for the implementation over the corpus.
+// Prints {"load", "outputs", "hash", "async_errors", "late_async_errors"} for
+// the implementation over the corpus. Async side effects are not part of the
+// behaviour signature: they are reported beside it, never in outputs or hash.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -17,7 +19,10 @@ type Output = { ok: unknown } | "THROW" | "TIMEOUT" | "CRASH";
 
 type WorkerSetup = { implUrl: string; functionName: string };
 type LoadMessage = { type: "load"; ok: boolean };
-type ResultMessage = { type: "result"; output: string };
+// asyncError: the call left an async error that surfaced before the result
+// was posted. lateErrors: errors that surfaced while no call was in its round,
+// counted since the previous result.
+type ResultMessage = { type: "result"; output: string; asyncError: boolean; lateErrors: number };
 
 function decodeArg(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(decodeArg);
@@ -91,25 +96,52 @@ async function runWorker(): Promise<void> {
     port.postMessage({ type: "load", ok: false } satisfies LoadMessage);
     return;
   }
+  // A leftover async error must not kill the worker, or it would land on
+  // whichever input happens to be running when it surfaces.
+  let inRound = false;
+  let roundErrors = 0;
+  let lateErrors = 0;
+  const countAsyncError = () => {
+    if (inRound) roundErrors++;
+    else lateErrors++;
+  };
+  process.on("uncaughtException", countAsyncError);
+  process.on("unhandledRejection", countAsyncError);
   port.postMessage({ type: "load", ok: true } satisfies LoadMessage);
 
   port.on("message", (inputJson: string) => {
     const input = JSON.parse(inputJson) as CorpusInput;
     const args = input.args.map(decodeArg);
+    inRound = true;
+    roundErrors = 0;
+    let output: string;
     let returned: unknown;
+    let threw = false;
     try {
       returned = (fn as (...a: unknown[]) => unknown)(...args);
     } catch {
-      port.postMessage({ type: "result", output: JSON.stringify("THROW") } satisfies ResultMessage);
-      return;
+      threw = true;
     }
-    // The Promise is recorded, not awaited; without a handler its rejection
-    // would kill the worker later and be charged to a different input.
-    if (returned instanceof Promise) returned.then(undefined, () => {});
-    // Canonicalising stays outside the try: a getter that throws or a cycle
-    // kills the worker, which the main thread records as CRASH.
-    const output = JSON.stringify({ ok: canon(returned, input.probe) });
-    port.postMessage({ type: "result", output } satisfies ResultMessage);
+    if (threw) {
+      output = JSON.stringify("THROW");
+    } else {
+      try {
+        output = JSON.stringify({ ok: canon(returned, input.probe) });
+      } catch {
+        // A getter that throws or a cyclic value breaks canonicalisation. The
+        // uncaughtException handler would otherwise swallow it and no result
+        // would ever be posted.
+        output = JSON.stringify("CRASH");
+      }
+    }
+    // One setImmediate round lets microtask throws and rejections raised by
+    // this call surface and be counted against it.
+    setImmediate(() => {
+      inRound = false;
+      const message: ResultMessage = { type: "result", output, asyncError: roundErrors > 0, lateErrors };
+      lateErrors = 0;
+      port.postMessage(message);
+    });
   });
 }
 
@@ -215,33 +247,41 @@ async function main(): Promise<void> {
 
   let worker: ImplWorker | null = first;
   const outputs: Output[] = [];
-  for (const input of corpus.inputs) {
-    // A worker can also die between inputs, from async work a previous call
-    // left behind; that input already has its output, so just replace it.
-    if (worker?.dead) {
-      await worker.terminate();
-      worker = null;
+  const asyncErrors: number[] = [];
+  let lateAsyncErrors = 0;
+  try {
+    for (const [index, input] of corpus.inputs.entries()) {
+      // A worker can also die between inputs (process.exit from a timer a
+      // previous call left behind); that input already has its output.
+      if (worker?.dead) {
+        await worker.terminate();
+        worker = null;
+      }
+      if (!worker) {
+        // Started lazily so a timeout or crash on the last input does not load a worker nobody uses.
+        worker = await startWorker(setup);
+        if (!worker) throw new Error(`evaluate: ${implPath} loaded once but failed to reload`);
+      }
+      worker.send(input);
+      const message = await worker.next(INPUT_TIMEOUT_MS);
+      if (message === "TIMEOUT" || message === "CRASH") {
+        outputs.push(message);
+        await worker.terminate();
+        worker = null;
+        continue;
+      }
+      if (message.type !== "result") throw new Error(`evaluate: unexpected worker message ${JSON.stringify(message)}`);
+      outputs.push(JSON.parse(message.output) as Output);
+      if (message.asyncError) asyncErrors.push(index);
+      lateAsyncErrors += message.lateErrors;
     }
-    if (!worker) {
-      // Started lazily so a timeout or crash on the last input does not load a worker nobody uses.
-      worker = await startWorker(setup);
-      if (!worker) throw new Error(`evaluate: ${implPath} loaded once but failed to reload`);
-    }
-    worker.send(input);
-    const message = await worker.next(INPUT_TIMEOUT_MS);
-    if (message === "TIMEOUT" || message === "CRASH") {
-      outputs.push(message);
-      await worker.terminate();
-      worker = null;
-      continue;
-    }
-    if (message.type !== "result") throw new Error(`evaluate: unexpected worker message ${JSON.stringify(message)}`);
-    outputs.push(JSON.parse(message.output) as Output);
+  } finally {
+    await worker?.terminate();
   }
-  await worker?.terminate();
 
   const hash = createHash("sha256").update(JSON.stringify(outputs), "utf8").digest("hex");
-  process.stdout.write(`${JSON.stringify({ load: "ok", outputs, hash })}\n`);
+  const result = { load: "ok", outputs, hash, async_errors: asyncErrors, late_async_errors: lateAsyncErrors };
+  process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
 if (isMainThread) {
