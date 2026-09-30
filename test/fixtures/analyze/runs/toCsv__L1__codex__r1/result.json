@@ -1,1 +1,1 @@
-{"fn": "toCsv", "level": "L1", "agent": "codex", "rep": 1, "cost_usd": null, "is_error": false, "impl_present": true, "impl_refused": null, "timed_out": false, "contamination": [], "external_fetches": ["npx tsc"]}
+{"fn": "toCsv", "level": "L1", "agent": "codex", "rep": 1, "cost_usd": null, "is_error": false, "impl_present": true, "impl_refused": null, "timed_out": false, "contamination": [], "external_fetches": []}

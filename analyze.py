@@ -22,9 +22,7 @@ single classes NOLOAD and ABSENT otherwise. Per (fn, level, agent) cell, per
 and, per cell, the corpus categories on which loaded runs disagree with the
 number of distinct outputs each category saw. A run with contamination or
 external fetches, or one that errored without leaving an impl, is excluded
-from every number and listed with its reason; a fetch of the TypeScript
-compiler alone (npx tsc, npm install typescript) does not exclude a run, and
-the runs kept that way are counted per agent. A run whose impl was refused on
+from every number and listed with its reason. A run whose impl was refused on
 copy-back (a link out of the work dir, not a regular file) is kept as ABSENT
 and listed with the reason. The per-level row takes median k and mean eff
 only over pooled rows with a loaded run, and says how many it left out. Cost is totalled per agent over
@@ -42,7 +40,6 @@ import hashlib
 import json
 import math
 import os
-import re
 import statistics
 import sys
 from collections import Counter
@@ -53,11 +50,6 @@ FUNCTIONS = ["parseEnv", "toCsv", "globToRegex", "safeFilename", "formatDuration
 LEVELS = ["L0", "L1", "L2", "L3"]
 AGENTS = ["sonnet", "opus", "codex"]
 PROVENANCE_KEYS = ["corpus_sha", "evaluator_sha", "image_id"]
-# npx or npm fetching the TypeScript compiler, as run.sh records it. An agent
-# type-checking its work downloads nothing that could hold the reference.
-TYPE_CHECKER_FETCH = re.compile(
-    r"(npx( -\S+)* (tsc|typescript)|npm (install|i|add)( -\S+)* typescript)(@\S+)?( -\S+)*"
-)
 
 
 class AnalysisError(Exception):
@@ -73,10 +65,6 @@ def read_json(path: Path):
         raise AnalysisError(f"{path} is not JSON: {error}") from None
 
 
-def is_type_checker_fetch(fetch: str) -> bool:
-    return TYPE_CHECKER_FETCH.fullmatch(fetch) is not None
-
-
 def refusal(result: dict) -> str | None:
     """Why run.sh refused to copy back an impl that was there; None when there was none to copy."""
     reason = result["impl_refused"]
@@ -86,7 +74,7 @@ def refusal(result: dict) -> str | None:
 def exclusion_reason(result: dict) -> str | None:
     if result["contamination"]:
         return "contamination: " + ", ".join(result["contamination"])
-    if not all(is_type_checker_fetch(f) for f in result["external_fetches"]):
+    if result["external_fetches"]:
         return "external_fetches: " + ", ".join(result["external_fetches"])
     if result["is_error"] and not result["impl_present"] and refusal(result) is None:
         return "is_error with no impl"
@@ -100,7 +88,7 @@ def load_run(run_dir: Path) -> dict:
         run = {
             "id": run_dir.name, "fn": result["fn"], "level": result["level"], "agent": result["agent"],
             "cost_usd": result["cost_usd"], "is_error": result["is_error"], "reason": exclusion_reason(result),
-            "fetched": bool(result["external_fetches"]), "timed_out": result["timed_out"],
+            "timed_out": result["timed_out"],
             "refused": refusal(result),
             "load": score["load"], "hash": score["hash"], "agree_ref": score["agree_ref"],
             "agree_frac": score["agree_frac"], "src_hash": score["src_hash"],
@@ -239,12 +227,9 @@ def analyse(runs: list[dict], tasks_dir: Path) -> dict:
             "runs_without_cost": len(agent_runs) - len(known),
         })
     excluded = [{"run": r["id"], "reason": r["reason"]} for r in runs if r["reason"] is not None]
-    # A kept run that fetched anything fetched only type-checker packages.
-    ignored_fetches = [{"agent": agent, "runs": sum(1 for r in included if r["agent"] == agent and r["fetched"])}
-                       for agent in AGENTS if any(r["agent"] == agent for r in runs)]
     refused = [{"run": r["id"], "reason": r["refused"]} for r in included if r["refused"] is not None]
     return {"cells": cells, "pooled": pooled, "levels": levels, "excluded": excluded, "refused": refused,
-            "ignored_fetches": ignored_fetches, "cost": cost}
+            "cost": cost}
 
 
 def fmt(value, digits: int = 2) -> str:
@@ -308,10 +293,6 @@ def print_report(report: dict) -> None:
         print(f"  {row['run']}: {row['reason']}")
     if not report["refused"]:
         print("  none")
-
-    print("\nIgnored fetches")
-    for row in report["ignored_fetches"]:
-        print(f"  {row['agent']}: {row['runs']} runs kept whose only fetches were type-checker downloads")
 
     print("\nCost by agent")
     for row in report["cost"]:
