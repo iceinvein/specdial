@@ -1,0 +1,1 @@
+{"fn": "toCsv", "level": "L1", "agent": "codex", "rep": 1, "cost_usd": null, "is_error": false, "impl_present": true, "contamination": [], "external_fetches": ["npx tsc"]}

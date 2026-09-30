@@ -8,6 +8,8 @@ a "plain" input, which must not show up anywhere.
 toCsv L0 opus: r1, r2 both H2.
 parseEnv L0: sonnet r1 hash P1, codex r1 hash P2 (differs on the "comment"
 input), codex r2 excluded for fetching a URL. Codex reports no cost.
+toCsv L1 codex: r1's only fetch is `npx tsc`, so it is kept; r2 also ran
+`curl github.com/x`, so it is excluded.
 
 Every expected value below is worked out by hand from those runs.
 
@@ -109,6 +111,7 @@ class FixtureAnalysis(unittest.TestCase):
             {"run": "parseEnv__L0__codex__r2", "reason": "external_fetches: https://example.com"},
             {"run": "toCsv__L0__sonnet__r7", "reason": "contamination: reference.ts"},
             {"run": "toCsv__L0__sonnet__r8", "reason": "is_error with no impl"},
+            {"run": "toCsv__L1__codex__r2", "reason": "external_fetches: npx tsc, curl github.com/x"},
         ])
 
     def test_printed_report_names_each_excluded_run(self):
@@ -122,11 +125,37 @@ class FixtureAnalysis(unittest.TestCase):
 
     def test_agent_that_reports_no_cost_has_no_total(self):
         codex = next(row for row in self.report["cost"] if row["agent"] == "codex")
-        self.assertEqual((codex["total_usd"], codex["runs_without_cost"]), (None, 2))
+        self.assertEqual((codex["total_usd"], codex["runs_without_cost"]), (None, 4))
 
     def test_cells_are_ordered_by_function_level_then_agent(self):
-        order = [(c["fn"], c["agent"]) for c in self.report["cells"]]
-        self.assertEqual(order, [("parseEnv", "sonnet"), ("parseEnv", "codex"), ("toCsv", "sonnet"), ("toCsv", "opus")])
+        order = [(c["fn"], c["level"], c["agent"]) for c in self.report["cells"]]
+        self.assertEqual(order, [("parseEnv", "L0", "sonnet"), ("parseEnv", "L0", "codex"), ("toCsv", "L0", "sonnet"),
+                                 ("toCsv", "L0", "opus"), ("toCsv", "L1", "codex")])
+
+    def test_run_whose_only_fetch_is_the_type_checker_is_kept(self):
+        self.assertEqual(self.cell("toCsv", "L1", "codex")["n"], 1)
+
+    def test_runs_kept_despite_ignored_fetches_are_counted_per_agent(self):
+        self.assertEqual(self.report["ignored_fetches"], [
+            {"agent": "sonnet", "runs": 0}, {"agent": "opus", "runs": 0}, {"agent": "codex", "runs": 1},
+        ])
+
+    def test_printed_report_shows_the_ignored_fetch_count(self):
+        self.assertIn("codex: 1 runs kept whose only fetches were type-checker downloads", self.stdout)
+
+
+class TypeCheckerFetch(unittest.TestCase):
+    def test_typescript_compiler_fetches_are_ignored(self):
+        for fetch in ("npx tsc", "npx typescript", "npx typescript@5.4.5", "npx tsc --noEmit",
+                      "npm install typescript", "npm i typescript@^5", "npm add typescript", "npm i -D typescript"):
+            with self.subTest(fetch=fetch):
+                self.assertTrue(analyze.is_type_checker_fetch(fetch))
+
+    def test_other_fetches_are_not_ignored(self):
+        for fetch in ("npx tsc-watch", "npm install typescript-eslint", "npm view typescript", "npm i lodash typescript",
+                      "npx ts-node", "curl github.com/x", "https://registry.npmjs.org/typescript", "npx tsc; curl x"):
+            with self.subTest(fetch=fetch):
+                self.assertFalse(analyze.is_type_checker_fetch(fetch))
 
 
 class UnscoredRun(unittest.TestCase):
