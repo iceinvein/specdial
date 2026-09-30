@@ -1,0 +1,29 @@
+{
+  "fn": "toCsv",
+  "level": "L0",
+  "agent": "codex",
+  "rep": 14,
+  "prompt": "Implement `toCsv` in `src/toCsv.ts`. The request is in `TICKET.md`.",
+  "cli": "codex-cli 0.159.2",
+  "impl_present": true,
+  "impl_refused": null,
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "is_error": false,
+  "cost_usd": null,
+  "turns": 1,
+  "codex_steps": 8,
+  "usage": {
+    "input_tokens": 53850,
+    "cached_input_tokens": 40960,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 1432,
+    "reasoning_output_tokens": 217
+  },
+  "contamination": [],
+  "external_fetches": [],
+  "timed_out": false,
+  "interrupted": null,
+  "exit_code": 0,
+  "wall_s": 87.607
+}

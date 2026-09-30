@@ -1,0 +1,56 @@
+{
+  "fn": "toCsv",
+  "level": "L3",
+  "agent": "sonnet",
+  "rep": 3,
+  "prompt": "Implement `toCsv` in `src/toCsv.ts`. The request is in `TICKET.md`, the full specification is in `SPEC.md`, and `src/toCsv.test.ts` and `src/toCsv.properties.test.ts` have tests it must pass. `npx vitest run` runs them.",
+  "cli": "2.1.285 (Claude Code)",
+  "impl_present": true,
+  "impl_refused": null,
+  "model": "claude-sonnet-5-5",
+  "effort": null,
+  "is_error": false,
+  "cost_usd": 0.036627,
+  "turns": 9,
+  "codex_steps": null,
+  "usage": {
+    "input_tokens": 8,
+    "cache_creation_input_tokens": 4484,
+    "cache_read_input_tokens": 40325,
+    "output_tokens": 1061,
+    "output_tokens_details": {
+      "thinking_tokens": 179
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 4484,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 164,
+        "cache_read_input_tokens": 12109,
+        "cache_creation_input_tokens": 610,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 610
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+  },
+  "contamination": [],
+  "external_fetches": [],
+  "timed_out": false,
+  "interrupted": null,
+  "exit_code": 0,
+  "wall_s": 13.125
+}
