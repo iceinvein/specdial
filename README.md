@@ -9,7 +9,7 @@ property tests) and measures how that count falls, whether different agents
 converge on the same behaviour, and which decisions are still open at the top.
 
 This is the harness and data behind
-[the write-up](https://dikrana.dev/blog/compiler-analogy-spec-dial/).
+[the write-up](https://dikrana.dev/blog/read-ai-generated-code/).
 
 ## Result
 
